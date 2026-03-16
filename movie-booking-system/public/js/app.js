@@ -610,58 +610,69 @@ async function confirmBooking() {
   const btn = document.getElementById('confirmBooking');
   btn.disabled = true; btn.textContent = 'Initializing Payment...';
 
-  // Razorpay Test Integration
-  const options = {
-    "key": "rzp_test_O00dof1R8jO7k2", // Reliable public test key
-    "amount": Math.round(total * 100), // convert to paise, ensure integer
-    "currency": "INR",
-    "name": "CineCloud Movie Tickets",
-    "description": `Booking for ${movie.title}`,
-    "image": "https://cdn-icons-png.flaticon.com/512/3658/3658959.png",
-    "handler": async function (response) {
-      toast('Payment successful! Confirming booking...', 'success');
-      btn.textContent = 'Booking...';
-
-      try {
-        const result = await api('/bookings', {
-          method: 'POST',
-          body: JSON.stringify({
-            movieId: movie.movieId,
-            movieTitle: movie.title,
-            showtime: state.selectedShowtime,
-            seats: state.selectedSeats.map(s => s.id),
-            seatDetails: state.selectedSeats,
-            totalPrice: total,
-            paymentId: response.razorpay_payment_id || `pay_fallback_${Date.now()}`
-          }),
-        });
-        toast('🎉 ' + result.message, 'success');
-        navigate('history');
-      } catch (err) {
-        toast(err.message, 'error');
-        btn.disabled = false;
-        btn.textContent = `Pay ₹${total} & Book`;
-        selectShowtime(state.selectedShowtime); // refresh seats in case of conflict
-      }
-    },
-    "prefill": {
-      "name": state.user?.name || "",
-      "email": state.user?.email || "",
-      "contact": "9999999999"
-    },
-    "theme": {
-      "color": "#7c3aed"
-    },
-    "modal": {
-      "ondismiss": function() {
-        toast('Payment cancelled', 'info');
-        btn.disabled = false;
-        btn.textContent = `Pay ₹${total} & Book`;
-      }
-    }
-  };
-
   try {
+    // 1. Get Razorpay Key from backend
+    const { key } = await api('/bookings/razorpay-key');
+
+    // 2. Create Order on Backend
+    const amountInPaise = Math.round(total * 100);
+    const order = await api('/bookings/razorpay-order', {
+      method: 'POST',
+      body: JSON.stringify({ amount: amountInPaise })
+    });
+
+    // 3. Razorpay Integration
+    const options = {
+      "key": key,
+      "amount": amountInPaise,
+      "currency": "INR",
+      "name": "CineCloud Movie Tickets",
+      "description": `Booking for ${movie.title}`,
+      "image": "https://cdn-icons-png.flaticon.com/512/3658/3658959.png",
+      "order_id": order.id, // THE CRUCIAL PART THAT WAS MISSING
+      "handler": async function (response) {
+        toast('Payment successful! Confirming booking...', 'success');
+        btn.textContent = 'Booking...';
+
+        try {
+          const result = await api('/bookings', {
+            method: 'POST',
+            body: JSON.stringify({
+              movieId: movie.movieId,
+              movieTitle: movie.title,
+              showtime: state.selectedShowtime,
+              seats: state.selectedSeats.map(s => s.id),
+              seatDetails: state.selectedSeats,
+              totalPrice: total,
+              paymentId: response.razorpay_payment_id || `pay_fallback_${Date.now()}`
+            }),
+          });
+          toast('🎉 ' + result.message, 'success');
+          navigate('history');
+        } catch (err) {
+          toast(err.message, 'error');
+          btn.disabled = false;
+          btn.textContent = `Pay ₹${total} & Book`;
+          selectShowtime(state.selectedShowtime); // refresh seats in case of conflict
+        }
+      },
+      "prefill": {
+        "name": state.user?.name || "",
+        "email": state.user?.email || "",
+        "contact": "9999999999"
+      },
+      "theme": {
+        "color": "#7c3aed"
+      },
+      "modal": {
+        "ondismiss": function() {
+          toast('Payment cancelled', 'info');
+          btn.disabled = false;
+          btn.textContent = `Pay ₹${total} & Book`;
+        }
+      }
+    };
+
     const rzp1 = new window.Razorpay(options);
     rzp1.on('payment.failed', function (response){
       toast('Payment failed: ' + response.error.description, 'error');
@@ -669,11 +680,12 @@ async function confirmBooking() {
       btn.textContent = `Pay ₹${total} & Book`;
     });
     rzp1.open();
+
   } catch (err) {
     console.error('Razorpay init error:', err);
-    toast('Error loading payment gateway. Proceeding with dummy payment...', 'warning');
-    // Fallback if Razorpay script is blocked or key fails
-    options.handler({ razorpay_payment_id: `pay_fallback_${Date.now()}` });
+    toast('Payment gateway Error. Please try again.', 'error');
+    btn.disabled = false;
+    btn.textContent = `Pay ₹${total} & Book`;
   }
 }
 
