@@ -364,7 +364,7 @@ async function renderBooking(container) {
 
     <div id="seatSection" style="display:none">
       <!-- Seat Type Selector -->
-      <div class="seat-type-picker fade-in delay-2">
+      <div class="seat-type-picker fade-in delay-2" id="seatTypePicker">
         <h4>Select Seat Type</h4>
         <div class="seat-type-options">
           <button class="seat-type-btn active" data-type="normal" onclick="changeSeatType('normal')">
@@ -392,17 +392,7 @@ async function renderBooking(container) {
             <div class="screen-label">Screen</div>
           </div>
 
-          <!-- Recliner Section (Rows A-B) -->
-          <div class="seat-section-label">🪑 Recliner — ₹${priceRecliner}</div>
-          <div class="seat-grid" id="seatGridRecliner"></div>
-
-          <!-- Sofa Section (Rows C-D) -->
-          <div class="seat-section-label">🛋️ Sofa — ₹${priceSofa}</div>
-          <div class="seat-grid" id="seatGridSofa"></div>
-
-          <!-- Normal Section (Rows E-J) -->
-          <div class="seat-section-label">💺 Normal — ₹${priceNormal}</div>
-          <div class="seat-grid" id="seatGridNormal"></div>
+          <div id="dynamicSeatGrids"></div>
 
           <div class="seat-legend">
             <div class="seat-legend-item"><div class="legend-box legend-available"></div> Available</div>
@@ -441,13 +431,19 @@ async function renderBooking(container) {
       </div>
     </div>
   `;
+
+  // Hide type picker if Luxe screen (all sofa)
+  if (movie.screenType === 'luxe') {
+    document.getElementById('seatTypePicker').style.display = 'none';
+    state.seatType = 'sofa';
+  }
 }
 
 // Seat layout config
 const SEAT_LAYOUT = {
-  recliner: { rows: ['A', 'B'], cols: 8, type: 'recliner' },
-  sofa:     { rows: ['C', 'D'], cols: 10, type: 'sofa' },
-  normal:   { rows: ['E', 'F', 'G', 'H', 'I', 'J'], cols: 12, type: 'normal' },
+  recliner: { rows: ['I', 'J'], cols: 8, type: 'recliner', label: '🪑 Recliner' },
+  sofa:     { rows: ['G', 'H'], cols: 10, type: 'sofa', label: '🛋️ Sofa' },
+  normal:   { rows: ['A', 'B', 'C', 'D', 'E', 'F'], cols: 12, type: 'normal', label: '💺 Normal' },
 };
 
 function changeSeatType(type) {
@@ -481,13 +477,43 @@ async function selectShowtime(time) {
 }
 
 function renderAllSeatGrids() {
-  renderSeatSection('seatGridRecliner', SEAT_LAYOUT.recliner);
-  renderSeatSection('seatGridSofa', SEAT_LAYOUT.sofa);
-  renderSeatSection('seatGridNormal', SEAT_LAYOUT.normal);
+  const container = document.getElementById('dynamicSeatGrids');
+  const movie = state.selectedMovie;
+  const isLuxe = movie.screenType === 'luxe';
+
+  let html = '';
+
+  if (isLuxe) {
+    // Luxe screens: all rows are Sofa. A-J rows.
+    html += `<div class="seat-section-label">🛋️ LUXE (All Sofa) — ₹${getPrice(movie, 'sofa')}</div>`;
+    html += `<div class="seat-grid" id="seatGridLuxe"></div>`;
+  } else {
+    // Normal layout matching cinema: Normal (front), Sofa (middle), Recliner (back)
+    html += `<div class="seat-section-label">${SEAT_LAYOUT.normal.label} — ₹${getPrice(movie, 'normal')}</div>`;
+    html += `<div class="seat-grid" id="seatGridNormal"></div>`;
+
+    html += `<div class="seat-section-label">${SEAT_LAYOUT.sofa.label} — ₹${getPrice(movie, 'sofa')}</div>`;
+    html += `<div class="seat-grid" id="seatGridSofa"></div>`;
+
+    html += `<div class="seat-section-label">${SEAT_LAYOUT.recliner.label} — ₹${getPrice(movie, 'recliner')}</div>`;
+    html += `<div class="seat-grid" id="seatGridRecliner"></div>`;
+  }
+
+  container.innerHTML = html;
+
+  if (isLuxe) {
+    renderSeatSection('seatGridLuxe', { rows: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'], cols: 10, type: 'sofa' });
+  } else {
+    renderSeatSection('seatGridNormal', SEAT_LAYOUT.normal);
+    renderSeatSection('seatGridSofa', SEAT_LAYOUT.sofa);
+    renderSeatSection('seatGridRecliner', SEAT_LAYOUT.recliner);
+  }
 }
 
 function renderSeatSection(containerId, layout) {
   const container = document.getElementById(containerId);
+  if (!container) return;
+
   container.innerHTML = layout.rows.map(row => {
     const seats = [];
     for (let c = 1; c <= layout.cols; c++) {
@@ -567,7 +593,7 @@ function updateBookingSummary() {
     btn.disabled = false;
     btn.onclick = () => navigate('login');
   } else {
-    btn.textContent = count > 0 ? `Confirm Booking — ₹${total}` : 'Select seats';
+    btn.textContent = count > 0 ? `Pay ₹${total} & Book` : 'Select seats';
     btn.disabled = count === 0;
     btn.onclick = confirmBooking;
   }
@@ -582,28 +608,67 @@ async function confirmBooking() {
   state.selectedSeats.forEach(s => { total += getPrice(movie, s.type); });
 
   const btn = document.getElementById('confirmBooking');
-  btn.disabled = true; btn.textContent = 'Booking...';
+  btn.disabled = true; btn.textContent = 'Initializing Payment...';
 
-  try {
-    const result = await api('/bookings', {
-      method: 'POST',
-      body: JSON.stringify({
-        movieId: movie.movieId,
-        movieTitle: movie.title,
-        showtime: state.selectedShowtime,
-        seats: state.selectedSeats.map(s => s.id),
-        seatDetails: state.selectedSeats,
-        totalPrice: total,
-      }),
-    });
-    toast('🎉 ' + result.message, 'success');
-    navigate('history');
-  } catch (err) {
-    toast(err.message, 'error');
+  // Razorpay Test Integration
+  const options = {
+    "key": "rzp_test_1DP5mmOlF5G5ag", // Razorpay Test Key (dummy/public test key)
+    "amount": total * 100, // paise
+    "currency": "INR",
+    "name": "CineCloud",
+    "description": `Ticket for ${movie.title}`,
+    "image": "https://cdn-icons-png.flaticon.com/512/3658/3658959.png",
+    "handler": async function (response) {
+      toast('Payment successful! Confirming booking...', 'success');
+      btn.textContent = 'Booking...';
+
+      try {
+        const result = await api('/bookings', {
+          method: 'POST',
+          body: JSON.stringify({
+            movieId: movie.movieId,
+            movieTitle: movie.title,
+            showtime: state.selectedShowtime,
+            seats: state.selectedSeats.map(s => s.id),
+            seatDetails: state.selectedSeats,
+            totalPrice: total,
+            paymentId: response.razorpay_payment_id
+          }),
+        });
+        toast('🎉 ' + result.message, 'success');
+        navigate('history');
+      } catch (err) {
+        toast(err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = `Pay ₹${total} & Book`;
+        selectShowtime(state.selectedShowtime); // refresh seats in case of conflict
+      }
+    },
+    "prefill": {
+      "name": state.user?.name || "",
+      "email": state.user?.email || "",
+      "contact": "9999999999"
+    },
+    "theme": {
+      "color": "#7c3aed"
+    },
+    "modal": {
+      "ondismiss": function() {
+        toast('Payment cancelled', 'info');
+        btn.disabled = false;
+        btn.textContent = `Pay ₹${total} & Book`;
+      }
+    }
+  };
+
+  const rzp1 = new window.Razorpay(options);
+  rzp1.on('payment.failed', function (response){
+    toast(response.error.description, 'error');
     btn.disabled = false;
-    btn.textContent = `Confirm Booking — ₹${total}`;
-    selectShowtime(state.selectedShowtime);
-  }
+    btn.textContent = `Pay ₹${total} & Book`;
+  });
+  
+  rzp1.open();
 }
 
 // ==================== HISTORY VIEW ====================
@@ -618,6 +683,10 @@ async function renderHistory(container) {
     </div>
   `;
 
+  loadBookings();
+}
+
+async function loadBookings() {
   try {
     const bookings = await api('/bookings');
     const list = document.getElementById('bookingList');
@@ -642,9 +711,10 @@ async function renderHistory(container) {
           <p>📅 ${b.showtime} &nbsp;•&nbsp; 💺 ${(b.seats || []).join(', ')}</p>
           <p>🕐 ${new Date(b.bookedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
         </div>
-        <div>
+        <div style="text-align: right">
           <span class="ticket-status status-confirmed">${b.status || 'Confirmed'}</span>
-          <div style="text-align:right;margin-top:8px;font-weight:800;color:var(--success)">₹${b.totalPrice || 0}</div>
+          <div style="margin: 8px 0; font-weight:800;color:var(--success)">₹${b.totalPrice || 0}</div>
+          <button class="btn btn-danger btn-sm" onclick="cancelBooking('${b.bookingId}')">Cancel Booking</button>
         </div>
       </div>
     `).join('');
@@ -656,6 +726,18 @@ async function renderHistory(container) {
         <p>${err.message}</p>
       </div>
     `;
+  }
+}
+
+async function cancelBooking(bookingId) {
+  if (!confirm('Are you sure you want to cancel this booking? This action cannot be undone and seats will be released.')) return;
+
+  try {
+    await api(`/bookings/${bookingId}`, { method: 'DELETE' });
+    toast('Booking cancelled successfully! Seals are released.', 'success');
+    loadBookings(); // refresh list
+  } catch (err) {
+    toast('Failed to cancel: ' + err.message, 'error');
   }
 }
 

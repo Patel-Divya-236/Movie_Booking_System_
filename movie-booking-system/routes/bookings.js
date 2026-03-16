@@ -132,4 +132,38 @@ router.get('/', authenticate, async (req, res) => {
   }
 });
 
+// DELETE /api/bookings/:id — cancel a booking
+router.delete('/:id', authenticate, async (req, res) => {
+  try {
+    const bookingId = req.params.id;
+
+    // First, get the booking to ensure it belongs to the user (unless admin)
+    const result = await docClient.send(new ScanCommand({
+      TableName: 'MovieBooking_Bookings',
+      FilterExpression: 'bookingId = :b',
+      ExpressionAttributeValues: { ':b': bookingId },
+    }));
+
+    const booking = result.Items?.[0];
+    if (!booking) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+
+    if (req.user.role !== 'admin' && booking.userId !== req.user.userId) {
+      return res.status(403).json({ error: 'Unauthorized to cancel this booking' });
+    }
+
+    // Delete it
+    await docClient.send(new DeleteCommand({
+      TableName: 'MovieBooking_Bookings',
+      Key: { bookingId },
+    }));
+
+    res.json({ message: 'Booking cancelled successfully. Seats are now available.' });
+  } catch (err) {
+    console.error('Cancel booking error:', err);
+    res.status(500).json({ error: 'Failed to cancel booking' });
+  }
+});
+
 module.exports = router;
