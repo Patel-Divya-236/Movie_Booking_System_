@@ -610,15 +610,12 @@ async function confirmBooking() {
   const btn = document.getElementById('confirmBooking');
   btn.disabled = true; btn.textContent = 'Initializing Payment...';
 
-  // Razorpay Test Integration
-  const options = {
-    "key": "rzp_test_1DP5mmOlF5G5ag", // Razorpay Test Key (dummy/public test key)
-    "amount": total * 100, // paise
-    "currency": "INR",
-    "name": "CineCloud",
-    "description": `Ticket for ${movie.title}`,
-    "image": "https://cdn-icons-png.flaticon.com/512/3658/3658959.png",
-    "handler": async function (response) {
+  // Simulated Payment Gateway for Assignment Purposes
+  // (Razorpay Test Keys often require backend order creation to work reliably)
+  setTimeout(() => {
+    btn.textContent = 'Processing Payment...';
+    
+    setTimeout(async () => {
       toast('Payment successful! Confirming booking...', 'success');
       btn.textContent = 'Booking...';
 
@@ -632,7 +629,7 @@ async function confirmBooking() {
             seats: state.selectedSeats.map(s => s.id),
             seatDetails: state.selectedSeats,
             totalPrice: total,
-            paymentId: response.razorpay_payment_id
+            paymentId: `pay_test_${Math.random().toString(36).substring(7)}`
           }),
         });
         toast('🎉 ' + result.message, 'success');
@@ -643,32 +640,8 @@ async function confirmBooking() {
         btn.textContent = `Pay ₹${total} & Book`;
         selectShowtime(state.selectedShowtime); // refresh seats in case of conflict
       }
-    },
-    "prefill": {
-      "name": state.user?.name || "",
-      "email": state.user?.email || "",
-      "contact": "9999999999"
-    },
-    "theme": {
-      "color": "#7c3aed"
-    },
-    "modal": {
-      "ondismiss": function() {
-        toast('Payment cancelled', 'info');
-        btn.disabled = false;
-        btn.textContent = `Pay ₹${total} & Book`;
-      }
-    }
-  };
-
-  const rzp1 = new window.Razorpay(options);
-  rzp1.on('payment.failed', function (response){
-    toast(response.error.description, 'error');
-    btn.disabled = false;
-    btn.textContent = `Pay ₹${total} & Book`;
-  });
-  
-  rzp1.open();
+    }, 1500); // Simulate processing time
+  }, 800); // Simulate initialization time
 }
 
 // ==================== HISTORY VIEW ====================
