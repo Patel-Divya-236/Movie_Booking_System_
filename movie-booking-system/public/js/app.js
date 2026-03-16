@@ -610,12 +610,15 @@ async function confirmBooking() {
   const btn = document.getElementById('confirmBooking');
   btn.disabled = true; btn.textContent = 'Initializing Payment...';
 
-  // Simulated Payment Gateway for Assignment Purposes
-  // (Razorpay Test Keys often require backend order creation to work reliably)
-  setTimeout(() => {
-    btn.textContent = 'Processing Payment...';
-    
-    setTimeout(async () => {
+  // Razorpay Test Integration
+  const options = {
+    "key": "rzp_test_O00dof1R8jO7k2", // Reliable public test key
+    "amount": Math.round(total * 100), // convert to paise, ensure integer
+    "currency": "INR",
+    "name": "CineCloud Movie Tickets",
+    "description": `Booking for ${movie.title}`,
+    "image": "https://cdn-icons-png.flaticon.com/512/3658/3658959.png",
+    "handler": async function (response) {
       toast('Payment successful! Confirming booking...', 'success');
       btn.textContent = 'Booking...';
 
@@ -629,7 +632,7 @@ async function confirmBooking() {
             seats: state.selectedSeats.map(s => s.id),
             seatDetails: state.selectedSeats,
             totalPrice: total,
-            paymentId: `pay_test_${Math.random().toString(36).substring(7)}`
+            paymentId: response.razorpay_payment_id || `pay_fallback_${Date.now()}`
           }),
         });
         toast('🎉 ' + result.message, 'success');
@@ -640,8 +643,38 @@ async function confirmBooking() {
         btn.textContent = `Pay ₹${total} & Book`;
         selectShowtime(state.selectedShowtime); // refresh seats in case of conflict
       }
-    }, 1500); // Simulate processing time
-  }, 800); // Simulate initialization time
+    },
+    "prefill": {
+      "name": state.user?.name || "",
+      "email": state.user?.email || "",
+      "contact": "9999999999"
+    },
+    "theme": {
+      "color": "#7c3aed"
+    },
+    "modal": {
+      "ondismiss": function() {
+        toast('Payment cancelled', 'info');
+        btn.disabled = false;
+        btn.textContent = `Pay ₹${total} & Book`;
+      }
+    }
+  };
+
+  try {
+    const rzp1 = new window.Razorpay(options);
+    rzp1.on('payment.failed', function (response){
+      toast('Payment failed: ' + response.error.description, 'error');
+      btn.disabled = false;
+      btn.textContent = `Pay ₹${total} & Book`;
+    });
+    rzp1.open();
+  } catch (err) {
+    console.error('Razorpay init error:', err);
+    toast('Error loading payment gateway. Proceeding with dummy payment...', 'warning');
+    // Fallback if Razorpay script is blocked or key fails
+    options.handler({ razorpay_payment_id: `pay_fallback_${Date.now()}` });
+  }
 }
 
 // ==================== HISTORY VIEW ====================
