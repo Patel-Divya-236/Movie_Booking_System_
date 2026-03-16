@@ -3,37 +3,8 @@ const { v4: uuidv4 } = require('uuid');
 const { docClient } = require('../db');
 const { PutCommand, ScanCommand, QueryCommand, DeleteCommand } = require('@aws-sdk/lib-dynamodb');
 const { authenticate } = require('../middleware/auth');
-const Razorpay = require('razorpay');
 
 const router = express.Router();
-
-// GET /api/bookings/razorpay-key
-router.get('/razorpay-key', (req, res) => {
-  res.json({ key: process.env.RAZORPAY_KEY_ID || 'rzp_test_O00dof1R8jO7k2' });
-});
-
-// POST /api/bookings/razorpay-order
-router.post('/razorpay-order', authenticate, async (req, res) => {
-  try {
-    const instance = new Razorpay({
-      key_id: process.env.RAZORPAY_KEY_ID || 'rzp_test_O00dof1R8jO7k2',
-      key_secret: process.env.RAZORPAY_KEY_SECRET || 'U8qMg7uYxM2sXzH3K5' // Demo test secret fallback
-    });
-
-    const options = {
-      amount: req.body.amount, // amount in the smallest currency unit (paise)
-      currency: "INR",
-      receipt: "receipt_order_" + Date.now(),
-    };
-
-    const order = await instance.orders.create(options);
-    if (!order) return res.status(500).json({ error: "Some error occured" });
-    res.json(order);
-  } catch (error) {
-    console.error('Razorpay order creation error:', error);
-    res.status(500).json({ error: error.message || 'Error creating order' });
-  }
-});
 
 // GET /api/bookings/seats/:movieId/:showtime — get booked seats for a showtime
 router.get('/seats/:movieId/:showtime', async (req, res) => {
