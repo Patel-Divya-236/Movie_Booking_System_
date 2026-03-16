@@ -12,6 +12,7 @@ const state = {
   selectedShowtime: null,
   selectedSeats: [],
   bookedSeats: [],
+  seatType: 'normal', // current selection mode
 };
 
 // ==================== API CLIENT ====================
@@ -59,21 +60,34 @@ function logout() {
   navigate('movies');
 }
 
+// ==================== PRICE HELPERS ====================
+function getPrice(movie, type) {
+  if (!movie || !movie.price) return 0;
+  if (typeof movie.price === 'number') return movie.price;
+  return movie.price[type] || movie.price.normal || 0;
+}
+
+function getMinPrice(movie) {
+  if (!movie || !movie.price) return 0;
+  if (typeof movie.price === 'number') return movie.price;
+  return movie.price.normal || 0;
+}
+
 // ==================== NAVIGATION ====================
 function navigate(view, data) {
   state.currentView = view;
   if (data) {
     if (view === 'book') state.selectedMovie = data;
+    if (view === 'editMovie') state.editingMovie = data;
   }
 
-  // Reset booking state when leaving booking page
   if (view !== 'book') {
     state.selectedShowtime = null;
     state.selectedSeats = [];
     state.bookedSeats = [];
+    state.seatType = 'normal';
   }
 
-  // Auth guard
   if (['history', 'admin'].includes(view) && !isLoggedIn()) {
     toast('Please login first', 'error');
     view = 'login';
@@ -90,12 +104,10 @@ function navigate(view, data) {
 }
 
 function updateNavbar() {
-  // Active link
   document.querySelectorAll('.nav-link').forEach(l => {
     l.classList.toggle('active', l.dataset.view === state.currentView);
   });
 
-  // Auth buttons
   const loginBtn = document.getElementById('loginBtn');
   const registerBtn = document.getElementById('registerBtn');
   const userMenu = document.getElementById('userMenu');
@@ -126,7 +138,6 @@ function toggleMobileNav() {
 function renderView() {
   const app = document.getElementById('app');
   app.style.opacity = '0';
-
   setTimeout(() => {
     switch (state.currentView) {
       case 'login': renderLogin(app); break;
@@ -135,6 +146,7 @@ function renderView() {
       case 'book': renderBooking(app); break;
       case 'history': renderHistory(app); break;
       case 'admin': renderAdmin(app); break;
+      case 'editMovie': renderEditMovie(app); break;
       default: renderMovies(app);
     }
     app.style.opacity = '1';
@@ -169,7 +181,6 @@ function renderLogin(container) {
     e.preventDefault();
     const btn = document.getElementById('loginSubmit');
     btn.disabled = true; btn.textContent = 'Signing in...';
-
     try {
       const data = await api('/auth/login', {
         method: 'POST',
@@ -219,7 +230,6 @@ function renderRegister(container) {
     e.preventDefault();
     const btn = document.getElementById('regSubmit');
     btn.disabled = true; btn.textContent = 'Creating account...';
-
     try {
       await api('/auth/register', {
         method: 'POST',
@@ -258,14 +268,12 @@ async function renderMovies(container) {
     state.movies = await api('/movies');
     renderMovieGrid();
 
-    // Build genre filters
     const genres = ['All', ...new Set(state.movies.map(m => m.genre).filter(Boolean))];
     const filtersEl = document.getElementById('genreFilters');
     filtersEl.innerHTML = genres.map(g =>
       `<button class="chip ${g === 'All' ? 'active' : ''}" onclick="filterByGenre('${g}')">${g}</button>`
     ).join('');
 
-    // Search handler
     document.getElementById('movieSearch').addEventListener('input', (e) => {
       renderMovieGrid(e.target.value, document.querySelector('.chip.active')?.textContent);
     });
@@ -313,9 +321,11 @@ function renderMovieGrid(search = '', genre = 'All') {
         <h3>${movie.title}</h3>
         <div class="movie-meta">
           <span class="badge badge-genre">${movie.genre || 'Movie'}</span>
+          ${movie.language ? `<span class="badge badge-lang">${movie.language}</span>` : ''}
           <span>⏱ ${movie.duration || '—'}</span>
         </div>
-        <div class="movie-price">₹${movie.price} <small>/ seat</small></div>
+        ${movie.screen ? `<div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">📍 ${movie.screen}</div>` : ''}
+        <div class="movie-price">₹${getMinPrice(movie)} <small>onwards</small></div>
       </div>
     </div>
   `).join('');
@@ -326,11 +336,21 @@ async function renderBooking(container) {
   const movie = state.selectedMovie;
   if (!movie) return navigate('movies');
 
+  const priceNormal = getPrice(movie, 'normal');
+  const priceSofa = getPrice(movie, 'sofa');
+  const priceRecliner = getPrice(movie, 'recliner');
+
   container.innerHTML = `
     <button class="btn btn-ghost" onclick="navigate('movies')" style="margin-bottom: 20px">← Back to Movies</button>
     <div class="page-header fade-in">
       <h1>${movie.title}</h1>
-      <p>${movie.description || movie.genre + ' • ' + movie.duration}</p>
+      <p>${movie.description || ''}</p>
+      <div style="margin-top:8px;font-size:13px;color:var(--text-secondary)">
+        ${movie.genre ? `<span class="badge badge-genre">${movie.genre}</span>` : ''}
+        ${movie.language ? `<span class="badge badge-lang" style="margin-left:6px">${movie.language}</span>` : ''}
+        ${movie.screen ? `<span style="margin-left:12px">📍 ${movie.screen}</span>` : ''}
+        ${movie.duration ? `<span style="margin-left:12px">⏱ ${movie.duration}</span>` : ''}
+      </div>
     </div>
 
     <div class="showtime-picker fade-in delay-1">
@@ -343,19 +363,54 @@ async function renderBooking(container) {
     </div>
 
     <div id="seatSection" style="display:none">
-      <div class="booking-layout fade-in delay-2">
+      <!-- Seat Type Selector -->
+      <div class="seat-type-picker fade-in delay-2">
+        <h4>Select Seat Type</h4>
+        <div class="seat-type-options">
+          <button class="seat-type-btn active" data-type="normal" onclick="changeSeatType('normal')">
+            <span class="seat-type-icon">💺</span>
+            <span class="seat-type-name">Normal</span>
+            <span class="seat-type-price">₹${priceNormal}</span>
+          </button>
+          <button class="seat-type-btn" data-type="sofa" onclick="changeSeatType('sofa')">
+            <span class="seat-type-icon">🛋️</span>
+            <span class="seat-type-name">Sofa</span>
+            <span class="seat-type-price">₹${priceSofa}</span>
+          </button>
+          <button class="seat-type-btn" data-type="recliner" onclick="changeSeatType('recliner')">
+            <span class="seat-type-icon">🪑</span>
+            <span class="seat-type-name">Recliner</span>
+            <span class="seat-type-price">₹${priceRecliner}</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="booking-layout fade-in delay-3">
         <div>
           <div class="screen-container">
             <div class="screen"></div>
             <div class="screen-label">Screen</div>
           </div>
-          <div class="seat-grid" id="seatGrid"></div>
+
+          <!-- Recliner Section (Rows A-B) -->
+          <div class="seat-section-label">🪑 Recliner — ₹${priceRecliner}</div>
+          <div class="seat-grid" id="seatGridRecliner"></div>
+
+          <!-- Sofa Section (Rows C-D) -->
+          <div class="seat-section-label">🛋️ Sofa — ₹${priceSofa}</div>
+          <div class="seat-grid" id="seatGridSofa"></div>
+
+          <!-- Normal Section (Rows E-J) -->
+          <div class="seat-section-label">💺 Normal — ₹${priceNormal}</div>
+          <div class="seat-grid" id="seatGridNormal"></div>
+
           <div class="seat-legend">
             <div class="seat-legend-item"><div class="legend-box legend-available"></div> Available</div>
             <div class="seat-legend-item"><div class="legend-box legend-selected"></div> Selected</div>
             <div class="seat-legend-item"><div class="legend-box legend-booked"></div> Booked</div>
           </div>
         </div>
+
         <div class="booking-summary" id="bookingSummary">
           <h3>🎟 Booking Summary</h3>
           <div class="summary-row">
@@ -373,11 +428,12 @@ async function renderBooking(container) {
               <div class="selected-seats-display" id="selectedSeatsDisplay"></div>
             </div>
           </div>
+          <div id="priceBreakdown"></div>
           <div class="summary-row summary-total">
             <span class="label" style="font-weight:600">Total</span>
             <span class="value" id="totalPrice">₹0</span>
           </div>
-          <button class="btn btn-primary btn-block btn-lg" id="confirmBooking" 
+          <button class="btn btn-primary btn-block btn-lg" id="confirmBooking"
                   onclick="confirmBooking()" disabled style="margin-top:20px">
             ${isLoggedIn() ? 'Confirm Booking' : 'Login to Book'}
           </button>
@@ -387,21 +443,32 @@ async function renderBooking(container) {
   `;
 }
 
+// Seat layout config
+const SEAT_LAYOUT = {
+  recliner: { rows: ['A', 'B'], cols: 8, type: 'recliner' },
+  sofa:     { rows: ['C', 'D'], cols: 10, type: 'sofa' },
+  normal:   { rows: ['E', 'F', 'G', 'H', 'I', 'J'], cols: 12, type: 'normal' },
+};
+
+function changeSeatType(type) {
+  state.seatType = type;
+  document.querySelectorAll('.seat-type-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.type === type);
+  });
+}
+
 async function selectShowtime(time) {
   state.selectedShowtime = time;
   state.selectedSeats = [];
   state.bookedSeats = [];
 
-  // Highlight selected showtime
   document.querySelectorAll('.showtime-btn').forEach(b => {
     b.classList.toggle('active', b.textContent.trim() === time);
   });
 
-  // Show seat section
   document.getElementById('seatSection').style.display = 'block';
   document.getElementById('summaryShowtime').textContent = time;
 
-  // Fetch already booked seats
   try {
     const data = await api(`/bookings/seats/${state.selectedMovie.movieId}/${encodeURIComponent(time)}`);
     state.bookedSeats = data.bookedSeats || [];
@@ -409,25 +476,29 @@ async function selectShowtime(time) {
     console.error('Failed to fetch seats:', err);
   }
 
-  renderSeatGrid();
+  renderAllSeatGrids();
   updateBookingSummary();
 }
 
-function renderSeatGrid() {
-  const rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
-  const cols = 10;
-  const grid = document.getElementById('seatGrid');
+function renderAllSeatGrids() {
+  renderSeatSection('seatGridRecliner', SEAT_LAYOUT.recliner);
+  renderSeatSection('seatGridSofa', SEAT_LAYOUT.sofa);
+  renderSeatSection('seatGridNormal', SEAT_LAYOUT.normal);
+}
 
-  grid.innerHTML = rows.map(row => {
+function renderSeatSection(containerId, layout) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = layout.rows.map(row => {
     const seats = [];
-    for (let c = 1; c <= cols; c++) {
+    for (let c = 1; c <= layout.cols; c++) {
       const seatId = `${row}${c}`;
       const isBooked = state.bookedSeats.includes(seatId);
-      const isSelected = state.selectedSeats.includes(seatId);
-      let cls = 'seat';
+      const seatData = state.selectedSeats.find(s => s.id === seatId);
+      const isSelected = !!seatData;
+      let cls = `seat seat-${layout.type}`;
       if (isBooked) cls += ' seat-booked';
       else if (isSelected) cls += ' seat-selected';
-      seats.push(`<div class="${cls}" onclick="toggleSeat('${seatId}')" title="${seatId}">${seatId}</div>`);
+      seats.push(`<div class="${cls}" onclick="toggleSeat('${seatId}','${layout.type}')" title="${seatId} (${layout.type})">${seatId}</div>`);
     }
     return `
       <div class="seat-row">
@@ -439,14 +510,14 @@ function renderSeatGrid() {
   }).join('');
 }
 
-function toggleSeat(seatId) {
+function toggleSeat(seatId, type) {
   if (!isLoggedIn()) {
     toast('Please login to select seats', 'error');
     return navigate('login');
   }
   if (state.bookedSeats.includes(seatId)) return;
 
-  const index = state.selectedSeats.indexOf(seatId);
+  const index = state.selectedSeats.findIndex(s => s.id === seatId);
   if (index > -1) {
     state.selectedSeats.splice(index, 1);
   } else {
@@ -454,22 +525,41 @@ function toggleSeat(seatId) {
       toast('Maximum 10 seats per booking', 'error');
       return;
     }
-    state.selectedSeats.push(seatId);
+    state.selectedSeats.push({ id: seatId, type: type });
   }
 
-  renderSeatGrid();
+  renderAllSeatGrids();
   updateBookingSummary();
 }
 
 function updateBookingSummary() {
+  const movie = state.selectedMovie;
   const count = state.selectedSeats.length;
-  const price = state.selectedMovie?.price || 0;
-  const total = count * price;
+
+  // Calculate total with different seat type prices
+  let total = 0;
+  const breakdown = { normal: 0, sofa: 0, recliner: 0 };
+  state.selectedSeats.forEach(s => {
+    const p = getPrice(movie, s.type);
+    total += p;
+    breakdown[s.type]++;
+  });
 
   document.getElementById('seatCount').textContent = count;
   document.getElementById('totalPrice').textContent = `₹${total}`;
   document.getElementById('selectedSeatsDisplay').innerHTML =
-    state.selectedSeats.map(s => `<span class="seat-tag">${s}</span>`).join('');
+    state.selectedSeats.map(s => {
+      const emoji = s.type === 'recliner' ? '🪑' : s.type === 'sofa' ? '🛋️' : '💺';
+      return `<span class="seat-tag seat-tag-${s.type}">${emoji} ${s.id}</span>`;
+    }).join('');
+
+  // Price breakdown
+  const breakdownEl = document.getElementById('priceBreakdown');
+  const lines = [];
+  if (breakdown.normal > 0) lines.push(`<div class="summary-row"><span class="label">Normal × ${breakdown.normal}</span><span class="value">₹${breakdown.normal * getPrice(movie, 'normal')}</span></div>`);
+  if (breakdown.sofa > 0) lines.push(`<div class="summary-row"><span class="label">Sofa × ${breakdown.sofa}</span><span class="value">₹${breakdown.sofa * getPrice(movie, 'sofa')}</span></div>`);
+  if (breakdown.recliner > 0) lines.push(`<div class="summary-row"><span class="label">Recliner × ${breakdown.recliner}</span><span class="value">₹${breakdown.recliner * getPrice(movie, 'recliner')}</span></div>`);
+  breakdownEl.innerHTML = lines.join('');
 
   const btn = document.getElementById('confirmBooking');
   if (!isLoggedIn()) {
@@ -487,6 +577,10 @@ async function confirmBooking() {
   if (!isLoggedIn()) return navigate('login');
   if (state.selectedSeats.length === 0) return;
 
+  const movie = state.selectedMovie;
+  let total = 0;
+  state.selectedSeats.forEach(s => { total += getPrice(movie, s.type); });
+
   const btn = document.getElementById('confirmBooking');
   btn.disabled = true; btn.textContent = 'Booking...';
 
@@ -494,11 +588,12 @@ async function confirmBooking() {
     const result = await api('/bookings', {
       method: 'POST',
       body: JSON.stringify({
-        movieId: state.selectedMovie.movieId,
-        movieTitle: state.selectedMovie.title,
+        movieId: movie.movieId,
+        movieTitle: movie.title,
         showtime: state.selectedShowtime,
-        seats: state.selectedSeats,
-        totalPrice: state.selectedSeats.length * state.selectedMovie.price,
+        seats: state.selectedSeats.map(s => s.id),
+        seatDetails: state.selectedSeats,
+        totalPrice: total,
       }),
     });
     toast('🎉 ' + result.message, 'success');
@@ -506,8 +601,7 @@ async function confirmBooking() {
   } catch (err) {
     toast(err.message, 'error');
     btn.disabled = false;
-    btn.textContent = `Confirm Booking — ₹${state.selectedSeats.length * state.selectedMovie.price}`;
-    // Refresh seats in case of conflict
+    btn.textContent = `Confirm Booking — ₹${total}`;
     selectShowtime(state.selectedShowtime);
   }
 }
@@ -589,9 +683,20 @@ async function renderAdmin(container) {
               <option value="Drama">Drama</option>
               <option value="Comedy">Comedy</option>
               <option value="Horror">Horror</option>
+              <option value="Horror Comedy">Horror Comedy</option>
               <option value="Romance">Romance</option>
               <option value="Thriller">Thriller</option>
               <option value="Animation">Animation</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Language</label>
+            <select id="movieLanguage">
+              <option value="Hindi">Hindi</option>
+              <option value="English">English</option>
+              <option value="Tamil">Tamil</option>
+              <option value="Telugu">Telugu</option>
+              <option value="Malayalam">Malayalam</option>
             </select>
           </div>
           <div class="form-group">
@@ -599,12 +704,21 @@ async function renderAdmin(container) {
             <input type="text" id="movieDuration" placeholder="e.g. 2h 30m">
           </div>
           <div class="form-group">
-            <label>Price (₹)</label>
-            <input type="number" id="moviePrice" placeholder="250" required>
+            <label>Screen</label>
+            <select id="movieScreen">
+              <option value="Screen 1 — IMAX">Screen 1 — IMAX</option>
+              <option value="Screen 2 — Dolby Atmos">Screen 2 — Dolby Atmos</option>
+              <option value="Screen 3 — 4DX">Screen 3 — 4DX</option>
+              <option value="Screen 4 — Standard">Screen 4 — Standard</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Base Price ₹ (Normal — Sofa & Recliner auto-calculated)</label>
+            <input type="number" id="moviePrice" placeholder="200" required>
           </div>
           <div class="form-group">
             <label>Showtimes (comma-separated)</label>
-            <input type="text" id="movieShowtimes" placeholder="10:00 AM, 2:00 PM, 6:00 PM" required>
+            <input type="text" id="movieShowtimes" placeholder="10:00 AM, 2:00 PM, 6:00 PM, 9:30 PM" required>
           </div>
           <div class="form-group">
             <label>Poster URL (optional)</label>
@@ -624,31 +738,16 @@ async function renderAdmin(container) {
     </div>
   `;
 
-  // Load stats and movies
   try {
-    const [movies, bookings] = await Promise.all([
-      api('/movies'),
-      api('/bookings'),
-    ]);
-
-    // Stats
+    const [movies, bookings] = await Promise.all([api('/movies'), api('/bookings')]);
     const totalRevenue = bookings.reduce((sum, b) => sum + (b.totalPrice || 0), 0);
+
     document.getElementById('adminStats').innerHTML = `
-      <div class="stat-card">
-        <div class="stat-value">${movies.length}</div>
-        <div class="stat-label">Total Movies</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">${bookings.length}</div>
-        <div class="stat-label">Total Bookings</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">₹${totalRevenue.toLocaleString()}</div>
-        <div class="stat-label">Total Revenue</div>
-      </div>
+      <div class="stat-card"><div class="stat-value">${movies.length}</div><div class="stat-label">Total Movies</div></div>
+      <div class="stat-card"><div class="stat-value">${bookings.length}</div><div class="stat-label">Total Bookings</div></div>
+      <div class="stat-card"><div class="stat-value">₹${totalRevenue.toLocaleString()}</div><div class="stat-label">Total Revenue</div></div>
     `;
 
-    // Movie list
     const movieList = document.getElementById('adminMovieList');
     if (movies.length === 0) {
       movieList.innerHTML = '<p style="color:var(--text-secondary)">No movies added yet</p>';
@@ -657,9 +756,12 @@ async function renderAdmin(container) {
         <div class="admin-movie-item">
           <div>
             <strong>${m.title}</strong>
-            <div style="font-size:12px;color:var(--text-secondary)">${m.genre} • ₹${m.price}</div>
+            <div style="font-size:12px;color:var(--text-secondary)">${m.genre} • ${m.language || ''} • ₹${getMinPrice(m)}+ • ${m.screen || ''}</div>
           </div>
-          <button class="btn btn-danger btn-sm" onclick="deleteMovie('${m.movieId}', '${m.title.replace(/'/g, "\\'")}')">Delete</button>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-ghost btn-sm" onclick='navigate("editMovie", ${JSON.stringify(m).replace(/'/g, "\\'")})'>✏️ Edit</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteMovie('${m.movieId}', '${m.title.replace(/'/g, "\\'")}')">🗑 Delete</button>
+          </div>
         </div>
       `).join('');
     }
@@ -668,21 +770,22 @@ async function renderAdmin(container) {
     toast('Failed to load admin data: ' + err.message, 'error');
   }
 
-  // Add movie form handler
+  // Add movie form
   document.getElementById('addMovieForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = document.getElementById('addMovieBtn');
     btn.disabled = true; btn.textContent = 'Adding...';
-
     try {
       await api('/movies', {
         method: 'POST',
         body: JSON.stringify({
           title: document.getElementById('movieTitle').value,
           genre: document.getElementById('movieGenre').value,
+          language: document.getElementById('movieLanguage').value,
           duration: document.getElementById('movieDuration').value,
           price: document.getElementById('moviePrice').value,
-          showtimes: document.getElementById('movieShowtimes').value.split(',').map(s => s.trim()),
+          showtimes: document.getElementById('movieShowtimes').value,
+          screen: document.getElementById('movieScreen').value,
           posterUrl: document.getElementById('moviePoster').value,
           description: document.getElementById('movieDesc').value,
         }),
@@ -705,6 +808,100 @@ async function deleteMovie(movieId, title) {
   } catch (err) {
     toast(err.message, 'error');
   }
+}
+
+// ==================== EDIT MOVIE VIEW ====================
+function renderEditMovie(container) {
+  const m = state.editingMovie;
+  if (!m) return navigate('admin');
+
+  const basePrice = typeof m.price === 'number' ? m.price : (m.price?.normal || 0);
+
+  container.innerHTML = `
+    <button class="btn btn-ghost" onclick="navigate('admin')" style="margin-bottom: 20px">← Back to Admin</button>
+    <div class="form-container fade-in" style="max-width:560px">
+      <h2>Edit Movie</h2>
+      <p class="form-subtitle">Update "${m.title}"</p>
+      <form id="editMovieForm">
+        <div class="form-group">
+          <label>Title</label>
+          <input type="text" id="editTitle" value="${m.title || ''}" required>
+        </div>
+        <div class="form-group">
+          <label>Genre</label>
+          <select id="editGenre">
+            ${['Action','Sci-Fi','Drama','Comedy','Horror','Horror Comedy','Romance','Thriller','Animation'].map(g =>
+              `<option value="${g}" ${m.genre === g ? 'selected' : ''}>${g}</option>`
+            ).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Language</label>
+          <select id="editLanguage">
+            ${['Hindi','English','Tamil','Telugu','Malayalam'].map(l =>
+              `<option value="${l}" ${m.language === l ? 'selected' : ''}>${l}</option>`
+            ).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Duration</label>
+          <input type="text" id="editDuration" value="${m.duration || ''}">
+        </div>
+        <div class="form-group">
+          <label>Screen</label>
+          <select id="editScreen">
+            ${['Screen 1 — IMAX','Screen 2 — Dolby Atmos','Screen 3 — 4DX','Screen 4 — Standard'].map(s =>
+              `<option value="${s}" ${m.screen === s ? 'selected' : ''}>${s}</option>`
+            ).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Base Price ₹ (Normal)</label>
+          <input type="number" id="editPrice" value="${basePrice}" required>
+        </div>
+        <div class="form-group">
+          <label>Showtimes (comma-separated)</label>
+          <input type="text" id="editShowtimes" value="${(m.showtimes || []).join(', ')}" required>
+        </div>
+        <div class="form-group">
+          <label>Poster URL</label>
+          <input type="url" id="editPoster" value="${m.posterUrl || ''}">
+        </div>
+        <div class="form-group">
+          <label>Description</label>
+          <textarea id="editDesc" rows="3">${m.description || ''}</textarea>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block btn-lg" id="editMovieBtn">Save Changes</button>
+      </form>
+    </div>
+  `;
+
+  document.getElementById('editMovieForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('editMovieBtn');
+    btn.disabled = true; btn.textContent = 'Saving...';
+    try {
+      await api(`/movies/${m.movieId}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          title: document.getElementById('editTitle').value,
+          genre: document.getElementById('editGenre').value,
+          language: document.getElementById('editLanguage').value,
+          duration: document.getElementById('editDuration').value,
+          price: document.getElementById('editPrice').value,
+          showtimes: document.getElementById('editShowtimes').value,
+          screen: document.getElementById('editScreen').value,
+          posterUrl: document.getElementById('editPoster').value,
+          description: document.getElementById('editDesc').value,
+        }),
+      });
+      toast('Movie updated! ✅', 'success');
+      navigate('admin');
+    } catch (err) {
+      toast(err.message, 'error');
+      btn.disabled = false; btn.textContent = 'Save Changes';
+    }
+  });
 }
 
 // ==================== TOAST NOTIFICATIONS ====================

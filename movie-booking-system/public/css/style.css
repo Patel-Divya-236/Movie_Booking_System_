@@ -764,3 +764,104 @@ img { max-width: 100%; }
   .movie-grid { grid-template-columns: 1fr; }
   .form-container { margin: 30px auto; padding: 28px; }
 }
+
+/* ---------- Seat Type Variants ---------- */
+.seat-recliner {
+  width: 44px; height: 40px;
+  border-radius: 10px 10px 6px 6px;
+  border-color: rgba(245,158,11,0.3);
+  background: rgba(245,158,11,0.08);
+}
+.seat-recliner:hover:not(.seat-booked):not(.seat-selected) {
+  background: rgba(245,158,11,0.2);
+  border-color: var(--warning);
+}
+.seat-sofa {
+  width: 40px; height: 38px;
+  border-radius: 8px;
+  border-color: rgba(16,185,129,0.3);
+  background: rgba(16,185,129,0.06);
+}
+.seat-sofa:hover:not(.seat-booked):not(.seat-selected) {
+  background: rgba(16,185,129,0.2);
+  border-color: var(--success);
+}
+
+/* Section Labels */
+.seat-section-label {
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin: 20px 0 10px;
+  padding: 8px 16px;
+  background: var(--bg-glass);
+  border-radius: var(--radius-sm);
+  display: inline-block;
+  width: 100%;
+  letter-spacing: 0.5px;
+}
+
+/* Seat Type Picker */
+.seat-type-picker {
+  margin-bottom: 24px;
+}
+.seat-type-picker h4 {
+  font-size: 14px; font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.seat-type-options {
+  display: flex; gap: 12px; flex-wrap: wrap;
+}
+.seat-type-btn {
+  flex: 1; min-width: 140px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  border: 2px solid var(--border);
+  color: var(--text-primary);
+  font-family: var(--font);
+  cursor: pointer;
+  transition: var(--transition);
+  display: flex; flex-direction: column;
+  align-items: center; gap: 6px;
+  text-align: center;
+}
+.seat-type-btn:hover {
+  border-color: var(--accent);
+}
+.seat-type-btn.active {
+  border-color: var(--accent);
+  background: rgba(124,58,237,0.1);
+  box-shadow: 0 0 20px var(--accent-glow);
+}
+.seat-type-icon { font-size: 24px; }
+.seat-type-name { font-size: 14px; font-weight: 600; }
+.seat-type-price {
+  font-size: 16px; font-weight: 800;
+  color: var(--success);
+}
+
+/* Language Badge */
+.badge-lang {
+  background: rgba(16,185,129,0.15);
+  color: var(--success);
+}
+
+/* Seat Tags by Type */
+.seat-tag-recliner {
+  background: rgba(245,158,11,0.15);
+  color: var(--warning);
+}
+.seat-tag-sofa {
+  background: rgba(16,185,129,0.15);
+  color: var(--success);
+}
+.seat-tag-normal {
+  background: rgba(124,58,237,0.15);
+  color: var(--accent-light);
+}
+
