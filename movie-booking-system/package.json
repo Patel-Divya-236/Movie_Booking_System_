@@ -5,18 +5,30 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "setup": "node setup-tables.js"
+    "setup": "node setup-tables.js",
+    "aws:setup": "node aws-setup.js",
+    "aws:provision": "node aws-deploy.js provision",
+    "aws:status": "node aws-deploy.js status",
+    "aws:stop": "node aws-deploy.js stop",
+    "aws:start": "node aws-deploy.js start"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.525.0",
+    "@aws-sdk/client-ec2": "^3.1101.0",
+    "@aws-sdk/client-iam": "^3.1101.0",
     "@aws-sdk/client-ses": "^3.525.0",
     "@aws-sdk/client-sns": "^3.525.0",
+    "@aws-sdk/client-ssm": "^3.1101.0",
+    "@aws-sdk/client-sts": "^3.1101.0",
     "@aws-sdk/lib-dynamodb": "^3.525.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.18.3",
     "jsonwebtoken": "^9.0.2",
+    "nodemailer": "^9.0.3",
+    "pdfkit": "^0.19.1",
+    "qrcode": "^1.5.4",
     "uuid": "^9.0.1"
   }
 }

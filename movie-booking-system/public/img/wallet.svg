@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="Wallet">
+  <title>Wallet</title>
+  <!-- The card poking out of the top is what makes this read as a wallet
+       rather than a plain card at the 26px the method tile renders it at —
+       body-and-clasp alone was ambiguous. Blue card against the amber body
+       also keeps it distinct from the card icon, which is blue-on-dark. -->
+  <rect x="13" y="6.5" width="22" height="12" rx="2.2" fill="#8FB6F5"/>
+  <rect x="16.5" y="10" width="15" height="2.4" rx="1.2" fill="#CFE0FC"/>
+
+  <rect x="4" y="14.5" width="40" height="27" rx="5.5" fill="#F5A524"/>
+  <path d="M4 20a5.5 5.5 0 0 1 5.5-5.5h29A5.5 5.5 0 0 1 44 20z" fill="#FFC85C"/>
+
+  <rect x="27.5" y="24" width="16.5" height="11" rx="3.2" fill="#2B2D42"/>
+  <circle cx="35.5" cy="29.5" r="2.9" fill="#F5A524"/>
+</svg>

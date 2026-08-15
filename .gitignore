@@ -1,1 +1,24 @@
 node_modules
+
+# Environment / secrets — never commit these
+.env
+*.env
+!.env.example
+
+# SSH private keys — losing control of these means losing the server
+*.pem
+*.ppk
+
+# Working notes. PROJECT_CONTEXT.md holds the admin password, the AWS account
+# id and the instance id — publishing it on a public repo hands over the
+# live site. Keep it local.
+PROJECT_CONTEXT.md
+
+# Test suites live in the scratchpad, not the repo (and one carries a personal
+# email address).
+_*.tmp.js
+
+# Logs & runtime
+*.log
+npm-debug.log*
+.DS_Store

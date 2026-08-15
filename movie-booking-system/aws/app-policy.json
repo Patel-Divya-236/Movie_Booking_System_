@@ -1,0 +1,42 @@
+{
+  "Version": "2012-10-17",
+  "Comment": "Attach to the EC2 instance ROLE. This is what the running app needs and nothing more — it cannot create or delete tables, so a compromised instance cannot destroy your data. Replace ACCOUNT_ID, or scope the SNS resource to your topic ARN.",
+  "Statement": [
+    {
+      "Sid": "ReadWriteBookingData",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Query",
+        "dynamodb:Scan",
+        "dynamodb:BatchWriteItem",
+        "dynamodb:BatchGetItem",
+        "dynamodb:TransactWriteItems",
+        "dynamodb:TransactGetItems",
+        "dynamodb:DescribeTable"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:*:*:table/MovieBooking_*",
+        "arn:aws:dynamodb:*:*:table/MovieBooking_*/index/*"
+      ]
+    },
+    {
+      "Sid": "SendTicketEmails",
+      "Effect": "Allow",
+      "Action": [
+        "ses:SendEmail",
+        "ses:SendRawEmail"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "PublishBookingAlerts",
+      "Effect": "Allow",
+      "Action": "sns:Publish",
+      "Resource": "arn:aws:sns:*:*:cinecloud-*"
+    }
+  ]
+}

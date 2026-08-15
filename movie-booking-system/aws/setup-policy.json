@@ -1,0 +1,134 @@
+{
+  "Version": "2012-10-17",
+  "Comment": "Attach to the IAM USER you run aws-setup.js and setup-tables.js with, from your laptop. Broader than the app needs because it creates tables, topics and identities. Not for the EC2 role.",
+  "Statement": [
+    {
+      "Sid": "ProvisionAndUseDynamoTables",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:CreateTable",
+        "dynamodb:DescribeTable",
+        "dynamodb:UpdateTable",
+        "dynamodb:DeleteTable",
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Query",
+        "dynamodb:Scan",
+        "dynamodb:BatchWriteItem",
+        "dynamodb:BatchGetItem",
+        "dynamodb:TransactWriteItems",
+        "dynamodb:TransactGetItems"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:*:*:table/MovieBooking_*",
+        "arn:aws:dynamodb:*:*:table/MovieBooking_*/index/*"
+      ]
+    },
+    {
+      "Sid": "ListTableNames",
+      "Comment": "ListTables is an account-level call — it does not act on a table, so it cannot be scoped to one. Harmless: it returns names only.",
+      "Effect": "Allow",
+      "Action": "dynamodb:ListTables",
+      "Resource": "*"
+    },
+    {
+      "Sid": "CreateAndUseBookingTopic",
+      "Effect": "Allow",
+      "Action": [
+        "sns:CreateTopic",
+        "sns:Subscribe",
+        "sns:Publish",
+        "sns:GetTopicAttributes",
+        "sns:ListSubscriptionsByTopic"
+      ],
+      "Resource": "arn:aws:sns:*:*:cinecloud-*"
+    },
+    {
+      "Sid": "VerifySenderAndSendMail",
+      "Effect": "Allow",
+      "Action": [
+        "ses:VerifyEmailIdentity",
+        "ses:GetIdentityVerificationAttributes",
+        "ses:GetSendQuota",
+        "ses:ListIdentities",
+        "ses:SendEmail",
+        "ses:SendRawEmail"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ConfirmWhoIAm",
+      "Effect": "Allow",
+      "Action": "sts:GetCallerIdentity",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ProvisionTheInstanceRole",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreatePolicy",
+        "iam:CreateRole",
+        "iam:GetRole",
+        "iam:AttachRolePolicy",
+        "iam:CreateInstanceProfile",
+        "iam:GetInstanceProfile",
+        "iam:AddRoleToInstanceProfile",
+        "iam:ListInstanceProfilesForRole"
+      ],
+      "Resource": [
+        "arn:aws:iam::*:role/CineCloudInstanceRole",
+        "arn:aws:iam::*:instance-profile/CineCloudInstanceRole",
+        "arn:aws:iam::*:policy/CineCloudApp"
+      ]
+    },
+    {
+      "Sid": "HandTheRoleToTheInstance",
+      "Comment": "RunInstances cannot attach an instance profile without PassRole. Scoped to this one role, and only when passing it to EC2.",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::*:role/CineCloudInstanceRole",
+      "Condition": {
+        "StringEquals": { "iam:PassedToService": "ec2.amazonaws.com" }
+      }
+    },
+    {
+      "Sid": "LookUpTheAmazonLinuxImage",
+      "Effect": "Allow",
+      "Action": "ssm:GetParameter",
+      "Resource": "arn:aws:ssm:*::parameter/aws/service/ami-amazon-linux-latest/*"
+    },
+    {
+      "Sid": "ReadEc2State",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeInstances",
+        "ec2:DescribeInstanceStatus",
+        "ec2:DescribeImages",
+        "ec2:DescribeKeyPairs",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeVpcs",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeTags"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ManageTheCineCloudInstance",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateKeyPair",
+        "ec2:CreateSecurityGroup",
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:RevokeSecurityGroupIngress",
+        "ec2:RunInstances",
+        "ec2:CreateTags",
+        "ec2:StartInstances",
+        "ec2:StopInstances",
+        "ec2:TerminateInstances"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

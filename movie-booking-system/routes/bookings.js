@@ -1,188 +1,320 @@
 const express = require('express');
+const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
-const { docClient } = require('../db');
-const { PutCommand, ScanCommand, QueryCommand, DeleteCommand } = require('@aws-sdk/lib-dynamodb');
+const { docClient, TABLES } = require('../db');
+const {
+  GetCommand, QueryCommand, ScanCommand, TransactWriteCommand,
+} = require('@aws-sdk/lib-dynamodb');
 const { authenticate } = require('../middleware/auth');
+const { computeBookingTotal } = require('../config/pricing');
+const { CANCELLATION_CUTOFF_MINUTES, REQUIRE_EMAIL_VERIFICATION } = require('../config/catalog');
+const ticket = require('../services/ticket');
+const notify = require('../services/notify');
 
 const router = express.Router();
 
-// GET /api/bookings/seats/:movieId/:showtime — get booked seats for a showtime
-router.get('/seats/:movieId/:showtime', async (req, res) => {
-  try {
-    const { movieId, showtime } = req.params;
-    const result = await docClient.send(new ScanCommand({
-      TableName: 'MovieBooking_Bookings',
-      FilterExpression: 'movieId = :m AND showtime = :s',
-      ExpressionAttributeValues: { ':m': movieId, ':s': decodeURIComponent(showtime) },
-    }));
+const PAYMENT_MODES = ['upi', 'card', 'netbanking', 'wallet'];
 
-    const bookedSeats = [];
-    if (result.Items) {
-      result.Items.forEach(booking => {
-        if (booking.seats) bookedSeats.push(...booking.seats);
-      });
-    }
-    res.json({ bookedSeats });
+/** Short, human-readable booking reference — easier to read out than a UUID. */
+function makeBookingRef() {
+  const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no I/O/0/1
+  const bytes = crypto.randomBytes(6);
+  let ref = '';
+  for (const b of bytes) ref += alphabet[b % alphabet.length];
+  return `CC-${ref}`;
+}
+
+async function getBookingById(bookingId) {
+  const res = await docClient.send(new GetCommand({
+    TableName: TABLES.BOOKINGS,
+    Key: { bookingId },
+  }));
+  return res.Item;
+}
+
+/** Owner or admin only. */
+function canAccess(booking, user) {
+  return user.role === 'admin' || booking.userId === user.userId;
+}
+
+// ---------------------------------------------------------------- reads
+
+/** GET /api/bookings/seats/:showId — which seats are taken. Public. */
+router.get('/seats/:showId', async (req, res, next) => {
+  try {
+    const locks = await docClient.send(new QueryCommand({
+      TableName: TABLES.SEAT_LOCKS,
+      KeyConditionExpression: 'showId = :s',
+      ExpressionAttributeValues: { ':s': req.params.showId },
+      ProjectionExpression: 'seatId',
+    }));
+    res.json({ bookedSeats: (locks.Items || []).map(l => l.seatId) });
   } catch (err) {
-    console.error('Get seats error:', err);
-    res.status(500).json({ error: 'Failed to fetch seat availability' });
+    next(err);
   }
 });
 
-// POST /api/bookings — create a booking
-router.post('/', authenticate, async (req, res) => {
+/** GET /api/bookings — the user's bookings, or everything for an admin. */
+router.get('/', authenticate, async (req, res, next) => {
   try {
-    const { movieId, movieTitle, showtime, seats, totalPrice } = req.body;
-    if (!movieId || !showtime || !seats || seats.length === 0) {
-      return res.status(400).json({ error: 'Movie, showtime, and seats are required' });
-    }
-
-    // Check for double booking
-    const existing = await docClient.send(new ScanCommand({
-      TableName: 'MovieBooking_Bookings',
-      FilterExpression: 'movieId = :m AND showtime = :s',
-      ExpressionAttributeValues: { ':m': movieId, ':s': showtime },
-    }));
-
-    const alreadyBooked = [];
-    if (existing.Items) {
-      existing.Items.forEach(b => {
-        if (b.seats) alreadyBooked.push(...b.seats);
-      });
-    }
-
-    const conflict = seats.filter(s => alreadyBooked.includes(s));
-    if (conflict.length > 0) {
-      return res.status(409).json({
-        error: `Seats already booked: ${conflict.join(', ')}`,
-        conflictSeats: conflict,
-      });
-    }
-
-    const bookingId = uuidv4();
-    await docClient.send(new PutCommand({
-      TableName: 'MovieBooking_Bookings',
-      Item: {
-        bookingId,
-        userId: req.user.userId,
-        userName: req.user.name,
-        userEmail: req.user.email,
-        movieId,
-        movieTitle: movieTitle || '',
-        showtime,
-        seats,
-        totalPrice: Number(totalPrice) || 0,
-        status: 'confirmed',
-        bookedAt: new Date().toISOString(),
-      },
-    }));
-
-    // Try to send SES notification (non-blocking, won't fail the booking)
-    try {
-      const { SESClient, SendEmailCommand } = require('@aws-sdk/client-ses');
-      const ses = new SESClient({ region: process.env.AWS_REGION || 'us-east-1' });
-      const fromEmail = process.env.SES_FROM_EMAIL;
-      const adminEmail = process.env.ADMIN_EMAIL || fromEmail; // Notifications go to admin
-
-      if (fromEmail && fromEmail !== 'your-verified-email@example.com') {
-        // Send email to the Customer (Ticket Receipt)
-        await ses.send(new SendEmailCommand({
-          Source: fromEmail,
-          Destination: { ToAddresses: [req.user.email] },
-          Message: {
-            Subject: { Data: `Booking Confirmed — ${movieTitle}` },
-            Body: {
-              Text: {
-                Data: `Hi ${req.user.name},\n\nYour payment is successful and your ticket is confirmed!\n\nMovie: ${movieTitle}\nShowtime: ${showtime}\nSeats: ${seats.join(', ')}\nTotal Paid: ₹${totalPrice}\n\nBooking ID: ${bookingId}\n\nEnjoy the show! 🎬`,
-              },
-            },
-          },
-        }));
-
-        // Send email to the Admin (Credit Notification)
-        if (adminEmail && adminEmail !== 'your-admin-email@example.com') {
-          await ses.send(new SendEmailCommand({
-            Source: fromEmail,
-            Destination: { ToAddresses: [adminEmail] },
-            Message: {
-              Subject: { Data: `[ADMIN] 💰 Credit Received! New Booking for ${movieTitle}` },
-              Body: {
-                Text: {
-                  Data: `Admin Notification:\n\nPayment Received: ₹${totalPrice}\nCustomer: ${req.user.name} (${req.user.email})\nMovie: ${movieTitle}\nShowtime: ${showtime}\nSeats: ${seats.join(', ')}\nBooking ID: ${bookingId}\n\nLogged at: ${new Date().toISOString()}`,
-                },
-              },
-            },
-          }));
-        }
-      }
-    } catch (sesErr) {
-      console.log('SES notification skipped (not configured):', sesErr.message);
-    }
-
-    res.status(201).json({ message: 'Booking confirmed!', bookingId });
-  } catch (err) {
-    console.error('Booking error:', err);
-    res.status(500).json({ error: 'Booking failed' });
-  }
-});
-
-// GET /api/bookings — get user's bookings (or all if admin)
-router.get('/', authenticate, async (req, res) => {
-  try {
-    let result;
+    let items;
     if (req.user.role === 'admin') {
-      result = await docClient.send(new ScanCommand({
-        TableName: 'MovieBooking_Bookings',
-      }));
+      // Admin reporting genuinely needs the whole table.
+      const res_ = await docClient.send(new ScanCommand({ TableName: TABLES.BOOKINGS }));
+      items = res_.Items || [];
     } else {
-      result = await docClient.send(new ScanCommand({
-        TableName: 'MovieBooking_Bookings',
-        FilterExpression: 'userId = :u',
+      const res_ = await docClient.send(new QueryCommand({
+        TableName: TABLES.BOOKINGS,
+        IndexName: 'userId-bookedAt-index',
+        KeyConditionExpression: 'userId = :u',
         ExpressionAttributeValues: { ':u': req.user.userId },
+        ScanIndexForward: false, // newest first, done by the index
       }));
+      items = res_.Items || [];
     }
 
-    const items = (result.Items || []).sort((a, b) =>
-      new Date(b.bookedAt) - new Date(a.bookedAt)
-    );
+    if (req.user.role === 'admin') {
+      items.sort((a, b) => new Date(b.bookedAt) - new Date(a.bookedAt));
+    }
     res.json(items);
   } catch (err) {
-    console.error('Get bookings error:', err);
-    res.status(500).json({ error: 'Failed to fetch bookings' });
+    next(err);
   }
 });
 
-// DELETE /api/bookings/:id — cancel a booking
-router.delete('/:id', authenticate, async (req, res) => {
+/** GET /api/bookings/:id */
+router.get('/:id', authenticate, async (req, res, next) => {
   try {
-    const bookingId = req.params.id;
-
-    // First, get the booking to ensure it belongs to the user (unless admin)
-    const result = await docClient.send(new ScanCommand({
-      TableName: 'MovieBooking_Bookings',
-      FilterExpression: 'bookingId = :b',
-      ExpressionAttributeValues: { ':b': bookingId },
-    }));
-
-    const booking = result.Items?.[0];
-    if (!booking) {
-      return res.status(404).json({ error: 'Booking not found' });
-    }
-
-    if (req.user.role !== 'admin' && booking.userId !== req.user.userId) {
-      return res.status(403).json({ error: 'Unauthorized to cancel this booking' });
-    }
-
-    // Delete it
-    await docClient.send(new DeleteCommand({
-      TableName: 'MovieBooking_Bookings',
-      Key: { bookingId },
-    }));
-
-    res.json({ message: 'Booking cancelled successfully. Seats are now available.' });
+    const booking = await getBookingById(req.params.id);
+    if (!booking) return res.status(404).json({ error: 'Booking not found' });
+    if (!canAccess(booking, req.user)) return res.status(403).json({ error: 'Not your booking' });
+    res.json(booking);
   } catch (err) {
-    console.error('Cancel booking error:', err);
-    res.status(500).json({ error: 'Failed to cancel booking' });
+    next(err);
+  }
+});
+
+/** GET /api/bookings/:id/ticket — the PDF, same one that gets emailed. */
+router.get('/:id/ticket', authenticate, async (req, res, next) => {
+  try {
+    const booking = await getBookingById(req.params.id);
+    if (!booking) return res.status(404).json({ error: 'Booking not found' });
+    if (!canAccess(booking, req.user)) return res.status(403).json({ error: 'Not your booking' });
+
+    const pdf = await ticket.generateTicketPdf(booking);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="CineCloud-${booking.bookingRef}.pdf"`);
+    res.setHeader('Content-Length', pdf.length);
+    res.send(pdf);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------- create
+
+/**
+ * POST /api/bookings
+ * Body: { showId, seats: ["A1","A2"], paymentMode }
+ *
+ * The client sends no prices. Everything is derived from the stored show and
+ * the seat layout, then the seats and the booking are written in a single
+ * DynamoDB transaction — one conditional Put per seat means a seat can only
+ * ever be claimed once, however many people click at the same instant.
+ */
+router.post('/', authenticate, async (req, res, next) => {
+  try {
+    // Off while SES is sandboxed — see REQUIRE_EMAIL_VERIFICATION in
+    // config/catalog.js for why enforcing it there would lock users out.
+    if (REQUIRE_EMAIL_VERIFICATION && !req.user.emailVerified) {
+      return res.status(403).json({
+        error: 'Please verify your email address before booking',
+        needsVerification: true,
+      });
+    }
+
+    const { showId, seats, paymentMode } = req.body;
+    if (!showId) return res.status(400).json({ error: 'showId is required' });
+
+    const showRes = await docClient.send(new GetCommand({
+      TableName: TABLES.SHOWS,
+      Key: { showId },
+    }));
+    const show = showRes.Item;
+    if (!show) return res.status(404).json({ error: 'Show not found' });
+
+    if (new Date(show.startsAt).getTime() <= Date.now()) {
+      return res.status(409).json({ error: 'This show has already started' });
+    }
+
+    const mode = PAYMENT_MODES.includes(paymentMode) ? paymentMode : 'upi';
+
+    // Throws a 400 for unknown seats, duplicates, or too many seats.
+    const priced = computeBookingTotal(seats, show);
+
+    const bookingId = uuidv4();
+    const bookingRef = makeBookingRef();
+    const bookedAt = new Date().toISOString();
+
+    const booking = {
+      bookingId,
+      bookingRef,
+      showId,
+
+      userId: req.user.userId,
+      userName: req.user.name,
+      userEmail: req.user.email,
+
+      // Denormalized so a ticket renders without extra reads.
+      movieId: show.movieId,
+      movieTitle: show.movieTitle,
+      posterUrl: show.posterUrl || '',
+      language: show.language,
+      certificate: show.certificate,
+      theatreId: show.theatreId,
+      theatreName: show.theatreName,
+      area: show.area || '',
+      city: show.city,
+      screenName: show.screenName,
+      format: show.format,
+      date: show.date,
+      time: show.time,
+      startsAt: show.startsAt,
+
+      seats: priced.seats,
+      seatIds: priced.seats.map(s => s.id),
+      subtotal: priced.subtotal,
+      convenienceFee: priced.convenienceFee,
+      gst: priced.gst,
+      totalPrice: priced.totalPrice,
+
+      // Simulated — no gateway is contacted and no card data is collected.
+      payment: {
+        paymentId: `PAY_${crypto.randomBytes(8).toString('hex').toUpperCase()}`,
+        mode,
+        status: 'paid',
+        simulated: true,
+        paidAt: bookedAt,
+      },
+
+      status: 'confirmed',
+      bookedAt,
+    };
+
+    const transactItems = [
+      ...priced.seats.map(seat => ({
+        Put: {
+          TableName: TABLES.SEAT_LOCKS,
+          Item: {
+            showId,
+            seatId: seat.id,
+            bookingId,
+            tier: seat.tier,
+            lockedAt: bookedAt,
+          },
+          // The whole point: if this seat already exists, the transaction dies.
+          ConditionExpression: 'attribute_not_exists(showId) AND attribute_not_exists(seatId)',
+        },
+      })),
+      { Put: { TableName: TABLES.BOOKINGS, Item: booking } },
+    ];
+
+    try {
+      await docClient.send(new TransactWriteCommand({ TransactItems: transactItems }));
+    } catch (err) {
+      if (err.name === 'TransactionCanceledException') {
+        // CancellationReasons lines up with TransactItems, so we can name the
+        // exact seats someone else got to first.
+        const conflicts = (err.CancellationReasons || [])
+          .map((reason, i) => (reason.Code === 'ConditionalCheckFailed' ? priced.seats[i]?.id : null))
+          .filter(Boolean);
+
+        return res.status(409).json({
+          error: conflicts.length
+            ? `Just gone — ${conflicts.join(', ')} ${conflicts.length > 1 ? 'were' : 'was'} booked by someone else`
+            : 'Those seats are no longer available',
+          conflictSeats: conflicts,
+        });
+      }
+      throw err;
+    }
+
+    res.status(201).json({ message: 'Booking confirmed', bookingId, bookingRef, booking });
+
+    // Ticket email and admin alert happen after the response — a slow or
+    // misconfigured SES must never delay or fail a confirmed booking.
+    notify.sendBookingNotifications(booking).catch(err => {
+      console.warn('Notification failed (booking is unaffected):', err.message);
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------- cancel
+
+/**
+ * DELETE /api/bookings/:id
+ * Releases the seats and marks the booking cancelled, atomically.
+ */
+router.delete('/:id', authenticate, async (req, res, next) => {
+  try {
+    const booking = await getBookingById(req.params.id);
+    if (!booking) return res.status(404).json({ error: 'Booking not found' });
+    if (!canAccess(booking, req.user)) {
+      return res.status(403).json({ error: 'Not your booking' });
+    }
+    if (booking.status === 'cancelled') {
+      return res.status(409).json({ error: 'This booking is already cancelled' });
+    }
+
+    // Admins can override the cutoff; users can't cancel a show that's about
+    // to start (or has already finished).
+    const minutesToShow = (new Date(booking.startsAt).getTime() - Date.now()) / 60000;
+    if (req.user.role !== 'admin' && minutesToShow < CANCELLATION_CUTOFF_MINUTES) {
+      return res.status(409).json({
+        error: minutesToShow < 0
+          ? 'This show has already started — it can no longer be cancelled'
+          : `Cancellations close ${CANCELLATION_CUTOFF_MINUTES} minutes before showtime`,
+      });
+    }
+
+    const seatIds = booking.seatIds || (booking.seats || []).map(s => s.id || s);
+
+    await docClient.send(new TransactWriteCommand({
+      TransactItems: [
+        ...seatIds.map(seatId => ({
+          Delete: {
+            TableName: TABLES.SEAT_LOCKS,
+            Key: { showId: booking.showId, seatId },
+          },
+        })),
+        {
+          Update: {
+            TableName: TABLES.BOOKINGS,
+            Key: { bookingId: booking.bookingId },
+            UpdateExpression: 'SET #s = :cancelled, cancelledAt = :now',
+            // Guards against two cancel clicks racing each other: the second
+            // one finds the status already changed and the whole thing aborts,
+            // so seats can't be released twice.
+            ConditionExpression: '#s = :confirmed',
+            ExpressionAttributeNames: { '#s': 'status' },
+            ExpressionAttributeValues: {
+              ':cancelled': 'cancelled',
+              ':confirmed': 'confirmed',
+              ':now': new Date().toISOString(),
+            },
+          },
+        },
+      ],
+    }));
+
+    res.json({ message: 'Booking cancelled — those seats are available again' });
+  } catch (err) {
+    if (err.name === 'TransactionCanceledException') {
+      return res.status(409).json({ error: 'This booking was already cancelled' });
+    }
+    next(err);
   }
 });
 

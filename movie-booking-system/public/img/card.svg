@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="Credit or debit card">
+  <title>Credit or debit card</title>
+  <defs>
+    <!-- The overlap is the intersection of the two discs. Clipping the second
+         circle to the first gives it exactly, with no arc-flag guesswork. -->
+    <clipPath id="cardMcLeft"><circle cx="26.5" cy="30" r="6.2"/></clipPath>
+  </defs>
+
+  <rect x="3" y="11" width="42" height="27" rx="4.5" fill="#33405E"/>
+  <rect x="3" y="16.5" width="42" height="5.5" fill="#141A2B"/>
+  <rect x="7.5" y="27" width="9" height="6.5" rx="1.6" fill="#D8B45A"/>
+
+  <circle cx="26.5" cy="30" r="6.2" fill="#EB001B"/>
+  <circle cx="34.5" cy="30" r="6.2" fill="#F79E1B"/>
+  <circle cx="34.5" cy="30" r="6.2" fill="#FF5F00" clip-path="url(#cardMcLeft)"/>
+</svg>

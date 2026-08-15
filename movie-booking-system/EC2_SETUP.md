@@ -1,122 +1,194 @@
-# 🚀 EC2 Deployment Guide — CineCloud Movie Booking System
+# CineCloud — AWS Setup & Deployment
 
-## Prerequisites
-- An AWS Academy Learner Lab (or any) account with EC2 access
-- An EC2 instance running **Amazon Linux 2** or **Ubuntu**
-- An **IAM Role** attached to the EC2 instance with permissions for:
-  - `DynamoDB` (Full Access or at minimum: CreateTable, PutItem, Scan, DeleteItem, DescribeTable)
-  - `SES` (optional, for email notifications)
+Two stages: **provision your AWS account** (once, from your laptop), then **deploy to EC2**.
+
+| Service | Role |
+|---|---|
+| **DynamoDB** | 6 tables — Users, Movies, Theatres, Shows, SeatLocks, Bookings — on-demand billing |
+| **EC2** | Runs the Node/Express server and serves the frontend |
+| **SES** | Emails the ticket PDF to the customer |
+| **SNS** | Publishes a booking alert to an admin topic |
+| **IAM** | Instance role, so no AWS keys are ever stored on the server |
 
 ---
 
-## Step-by-Step Deployment
+## Stage 1 — Provision the account (from your laptop)
 
-### 1. Launch EC2 Instance
-1. Go to AWS Console → EC2 → **Launch Instance**
-2. Choose **Amazon Linux 2023** AMI (free tier eligible)
-3. Instance type: **t2.micro** (free tier)
-4. Key pair: Create or select one (you can also use EC2 Instance Connect)
-5. Security Group: Allow inbound:
-   - **SSH (22)** — for terminal access
-   - **Custom TCP (3000)** — for the web app
-6. Under **Advanced Details → IAM instance profile**: Attach the role created by your lab (usually `LabInstanceProfile` or similar)
-7. Launch!
+### 1.1 Create an IAM user for setup
 
-### 2. Connect to EC2
-- Use **EC2 Instance Connect** (browser-based SSH) from the AWS Console
-- Or SSH: `ssh -i your-key.pem ec2-user@<PUBLIC-IP>`
+Root credentials should never be used by an application. In the AWS console:
 
-### 3. Install Node.js
-```bash
-# Amazon Linux 2023
-sudo yum install -y nodejs npm git
+1. **IAM → Users → Create user**, name it `cinecloud-setup`
+2. Skip console access — this user only needs programmatic access
+3. **Attach policies directly → Create policy → JSON**, paste [`aws/setup-policy.json`](aws/setup-policy.json), name it `CineCloudSetup`
+4. Attach `CineCloudSetup` to the user
+5. Open the user → **Security credentials → Create access key** → *Application running outside AWS*
+6. Copy the access key ID and secret — the secret is shown **once**
 
-# OR Ubuntu
-# sudo apt update && sudo apt install -y nodejs npm git
+> The policy is scoped to `MovieBooking_*` tables and `cinecloud-*` topics, so this key cannot touch anything else in your account.
+
+### 1.2 Put the credentials in `.env`
+
+Edit `movie-booking-system/.env`:
+
+```ini
+AWS_REGION=ap-south-1
+AWS_ACCESS_KEY_ID=AKIA...
+AWS_SECRET_ACCESS_KEY=...
+
+# Comment this out — it points at DynamoDB Local:
+# DYNAMODB_ENDPOINT=http://localhost:8000
 ```
 
-### 4. Upload the Project
+`.env` is gitignored. Never commit it.
 
-**Option A — Git Clone** (if you push to GitHub):
-```bash
-git clone https://github.com/YOUR_USERNAME/movie-booking-system.git
-cd movie-booking-system
-```
+### 1.3 Run the setup
 
-**Option B — SCP from local** (upload the folder):
-```bash
-# Run this from YOUR LOCAL PC (not EC2)
-scp -i your-key.pem -r ./movie-booking-system ec2-user@<PUBLIC-IP>:~/
-```
-
-**Option C — Copy-paste files** via EC2 Instance Connect terminal (manually create files using `nano` or `vi`).
-
-### 5. Install Dependencies
 ```bash
 cd movie-booking-system
 npm install
+
+node aws-setup.js      # confirms the account, creates the SNS topic, verifies the SES sender
+node setup-tables.js   # creates the 6 tables with their indexes, then seeds the catalog
+node server.js         # http://localhost:3000, now on real AWS
 ```
 
-### 6. Configure Environment
-```bash
-cp .env.example .env
-# Edit if needed: nano .env
-# The defaults should work — just make sure AWS_REGION matches your EC2 region
-```
+`aws-setup.js` prints the account ID and asks before creating anything. Both scripts are idempotent.
 
-### 7. Create DynamoDB Tables & Seed Data
-```bash
-node setup-tables.js
-```
-This creates 3 tables (`MovieBooking_Users`, `MovieBooking_Movies`, `MovieBooking_Bookings`), seeds 6 sample movies, and creates an admin user.
+### 1.4 Confirm the two emails
 
-### 8. Start the Server
-```bash
-node server.js
-```
-You should see:
-```
-🎬 Movie Booking System running at http://localhost:3000
-```
+- **SNS** sends a subscription confirmation — alerts do not flow until you click it.
+- **SES** sends a verification link for the sender address.
 
-### 9. Access the App!
-Open your browser and go to:
-```
-http://<YOUR-EC2-PUBLIC-IP>:3000
-```
+**SES sandbox:** a new account can only send *to verified addresses*. Verify your own test address under **SES → Identities**, or request production access. Until then, ticket emails to unverified addresses fail silently — bookings still succeed, which is by design.
 
 ---
 
-## Default Credentials
+## Stage 2 — Deploy to EC2 (automated)
 
-| Role  | Email                   | Password |
-|-------|-------------------------|----------|
-| Admin | admin@moviebooking.com  | admin123 |
+```bash
+node aws-deploy.js provision
+```
 
-Regular users can register through the Sign Up page.
+One command creates all of it, and is safe to re-run — anything that already exists is reused:
+
+| Resource | What it is |
+|---|---|
+| `CineCloudApp` policy | Least privilege: read/write the tables, send mail, publish alerts. **Cannot create or delete tables**, so a compromised instance cannot destroy your data |
+| `CineCloudInstanceRole` | Instance role, so no AWS keys are ever written to the server |
+| `cinecloud-key.pem` | SSH key, saved locally. AWS reveals the private key **once** — it is gitignored, keep it |
+| `cinecloud-sg` | Firewall: port 80 open, port 22 restricted to **your current IP** |
+| `cinecloud` instance | t2.micro Amazon Linux 2023, IMDSv2 enforced |
+
+The instance's first boot installs Node 22, nginx and pm2, and configures nginx to proxy port 80 → 3000. Port 3000 is never exposed.
+
+The script **asks before launching** — that's the only resource here billed by the hour.
+
+### Managing the instance
+
+```bash
+node aws-deploy.js status      # state and public IP
+node aws-deploy.js stop        # stops hourly billing
+node aws-deploy.js start       # note: the public IP changes
+node aws-deploy.js terminate   # destroys it; DynamoDB/SNS/SES untouched
+```
+
+### Upload and start the app
+
+Wait ~2 minutes after provisioning for the bootstrap to finish:
+
+```bash
+IP=<public-ip>
+ssh -i cinecloud-key.pem ec2-user@$IP "ls ~/.bootstrap-complete"   # exists when ready
+
+scp -i cinecloud-key.pem -r ./routes ./services ./config ./public \
+    ./server.js ./db.js ./setup-tables.js ./package.json \
+    ec2-user@$IP:~/app/
+
+scp -i cinecloud-key.pem ./.env.production.example ec2-user@$IP:~/app/.env
+```
+
+Then on the instance:
+
+```bash
+ssh -i cinecloud-key.pem ec2-user@$IP
+cd ~/app
+npm install --omit=dev
+
+nano .env     # set a NEW JWT_SECRET, the region, SES sender and SNS topic ARN
+              # leave the AWS key lines out — the instance role supplies them
+
+node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"   # JWT_SECRET
+
+pm2 start server.js --name cinecloud
+pm2 startup   # run the command it prints
+pm2 save
+pm2 logs cinecloud
+```
+
+Your site is now `http://<PUBLIC-IP>` — no port number.
+
+### If you would rather do it by hand
+
+Everything above maps to console actions: create the two policies from `aws/*.json`, make an EC2 role from `app-policy.json`, launch Amazon Linux 2023 t2.micro with that instance profile, open 22 (your IP) and 80, then install Node/nginx/pm2 yourself.
+
+---
+
+## Verifying the deployment
+
+```bash
+curl http://<PUBLIC-IP>/api/health
+# {"status":"ok","time":"...","dynamo":"aws"}
+```
+
+`"dynamo":"aws"` confirms it is not pointing at DynamoDB Local. Then in a browser: pick a city → open a film → play the trailer → pick a showtime → select seats → pay → download the PDF → check your inbox for the ticket and the SNS alert.
 
 ---
 
 ## Troubleshooting
 
-| Issue | Solution |
-|-------|----------|
-| Can't connect on port 3000 | Check Security Group allows inbound TCP 3000 |
-| DynamoDB permission denied | Ensure EC2 has IAM role with DynamoDB access |
-| `npm install` fails | Run `sudo yum install nodejs npm` first |
-| Server crashes on start | Check `.env` file exists with correct values |
-| TMDB poster images not loading | These are external URLs; they work if EC2 has internet |
+| Symptom | Cause |
+|---|---|
+| `CredentialsProviderError` on EC2 | No instance profile attached. Stop the instance → **Actions → Security → Modify IAM role** |
+| `AccessDeniedException` on DynamoDB | Role is missing `CineCloudApp`, or tables are in another region |
+| `ResourceNotFoundException` | Tables were created in a different region than `AWS_REGION` |
+| Site unreachable | Security group inbound rule missing, or pm2 is not running (`pm2 list`) |
+| No ticket email | Sender not verified, or SES sandbox and the recipient is unverified. `pm2 logs` shows the skip reason |
+| No SNS alert | Subscription confirmation link never clicked |
+| `"dynamo":"http://localhost:8000"` | `DYNAMODB_ENDPOINT` is still set in `.env` |
 
 ---
 
-## Run in Background (optional)
-To keep the server running after closing the terminal:
-```bash
-nohup node server.js > app.log 2>&1 &
+## Costs
+
+Within the AWS Free Tier this runs at effectively zero: t2.micro is 750 hours/month for 12 months, DynamoDB on-demand covers 25 GB and low request volumes, SES is 62,000 outbound messages/month from EC2, SNS 1,000 email notifications.
+
+**Stop the EC2 instance when you are not demoing it** — it is the only component that bills by the hour.
+
+---
+
+## Admin login
+
+No password is stored in this repository — that would make every deployment of
+this code trivially compromised.
+
+`setup-tables.js` reads the admin credentials from `.env`:
+
+```ini
+ADMIN_EMAIL=you@example.com
+ADMIN_PASSWORD=a-long-password-you-choose
 ```
-Or install PM2:
+
+If `ADMIN_PASSWORD` is unset, the seed generates a random one and prints it
+**once** — save it at that point.
+
+To change it later:
+
 ```bash
-sudo npm install -g pm2
-pm2 start server.js --name cinecloud
-pm2 save
+node set-admin-password.js                        # random, printed once
+node set-admin-password.js --password=yourchoice  # pick your own
+node set-admin-password.js --email=you@example.com --promote
 ```
+
+The last form promotes an existing account to admin, which is the cleanest way
+to give yourself access using an account you registered on the site normally.

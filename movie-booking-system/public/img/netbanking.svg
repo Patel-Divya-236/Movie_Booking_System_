@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="Net banking">
+  <title>Net banking</title>
+  <!-- Classical bank facade: pediment, columns, plinth. Flat fills only, so it
+       stays legible at the 19px the method tile renders it at. -->
+  <path d="M24 4 2.5 15.2v4.3h43v-4.3z" fill="#5B8DEF"/>
+  <rect x="7"    y="22" width="5" height="15" rx="1.2" fill="#9DBEFA"/>
+  <rect x="16.3" y="22" width="5" height="15" rx="1.2" fill="#9DBEFA"/>
+  <rect x="25.6" y="22" width="5" height="15" rx="1.2" fill="#9DBEFA"/>
+  <rect x="35"   y="22" width="5" height="15" rx="1.2" fill="#9DBEFA"/>
+  <rect x="2.5"  y="39.5" width="43" height="5" rx="1.6" fill="#5B8DEF"/>
+</svg>

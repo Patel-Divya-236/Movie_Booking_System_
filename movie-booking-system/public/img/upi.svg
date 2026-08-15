@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="UPI">
+  <title>UPI</title>
+  <!-- UPI wordmark with the tricolour chevron. Letters are strokes rather than
+       <text> so nothing depends on a font being installed, and they are light
+       grey because the checkout modal is near-black — the official dark-grey
+       mark would be invisible there. -->
+  <g fill="none" stroke="#E9E9EE" stroke-width="3.4" stroke-linecap="square">
+    <path d="M3 15v10.5a4.7 4.7 0 0 0 9.4 0V15"/>
+    <path d="M18.4 31.5V15h4.8a4.5 4.5 0 0 1 0 9h-4.8"/>
+    <path d="M31 15v16.5"/>
+  </g>
+  <path d="M35 13.6l6.1 9.7-6.1 9.7z" fill="#FF9933"/>
+  <path d="M40.6 13.6l6.1 9.7-6.1 9.7z" fill="#138808"/>
+</svg>
