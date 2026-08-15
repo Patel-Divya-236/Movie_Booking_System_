@@ -1,9 +1,17 @@
 node_modules
 
-# Environment / secrets — never commit these
+# Environment / secrets — never commit these.
+#
+# `.env.*` matters as much as `.env` itself: a backup like .env.bak or
+# .env.bak.1723... holds exactly the same live secrets, and `*.env` does not
+# catch it because that only matches names ENDING in .env. The negations must
+# stay below the ignore lines, or the examples get swallowed too.
 .env
+.env.*
 *.env
+*.bak
 !.env.example
+!.env.production.example
 
 # SSH private keys — losing control of these means losing the server
 *.pem
