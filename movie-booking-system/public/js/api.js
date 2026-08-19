@@ -81,6 +81,11 @@ export const api = {
   forgotPassword: email => request('/auth/forgot-password', { method: 'POST', body: { email } }),
   resetPassword: (token, password) => request('/auth/reset-password', { method: 'POST', body: { token, password } }),
 
+  paymentKey: () => request('/payments/key'),
+  createOrder: body => request('/payments/order', { method: 'POST', body }),
+  verifyPayment: body => request('/payments/verify', { method: 'POST', body }),
+  releaseSeats: body => request('/payments/release', { method: 'POST', body }),
+
   reviews: movieId => request(`/reviews/${movieId}`),
   rateMovie: (movieId, body) => request(`/reviews/${movieId}`, { method: 'POST', body }),
 

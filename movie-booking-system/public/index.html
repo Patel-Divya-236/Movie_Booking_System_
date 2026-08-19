@@ -20,13 +20,16 @@
   <main id="app" class="main"></main>
 
   <footer class="footer">
-    <p>Bookings are simulated. No real payment is processed and no tickets are valid at any cinema.</p>
+    <p>Payments run through Razorpay in test mode — no real money is charged, and no ticket is valid at any cinema.</p>
     <p><a href="/support">Need help?</a></p>
   </footer>
 
   <div id="toastContainer" class="toast-container" aria-live="polite"></div>
   <div id="modalHost"></div>
 
+  <!-- Razorpay Checkout. Loaded up front rather than on demand so a slow
+       network cannot leave someone staring at a dead Pay button. -->
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   <script type="module" src="/js/main.js"></script>
 </body>
 </html>

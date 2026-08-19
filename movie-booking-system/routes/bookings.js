@@ -46,9 +46,23 @@ router.get('/seats/:showId', async (req, res, next) => {
       TableName: TABLES.SEAT_LOCKS,
       KeyConditionExpression: 'showId = :s',
       ExpressionAttributeValues: { ':s': req.params.showId },
-      ProjectionExpression: 'seatId',
+      ProjectionExpression: 'seatId, #st, expiresAt',
+      ExpressionAttributeNames: { '#st': 'status' },
     }));
-    res.json({ bookedSeats: (locks.Items || []).map(l => l.seatId) });
+
+    // A lock blocks a seat unless it is a hold that has already lapsed.
+    // Anything with no status predates holds and is always a real booking, so
+    // legacy items stay taken.
+    const now = Date.now();
+    const items = locks.Items || [];
+    const blocking = items.filter(l =>
+      l.status !== 'hold' || new Date(l.expiresAt).getTime() > now);
+
+    res.json({
+      bookedSeats: blocking.map(l => l.seatId),
+      // Split out so the seat map can show holds differently from sold seats.
+      heldSeats: blocking.filter(l => l.status === 'hold').map(l => l.seatId),
+    });
   } catch (err) {
     next(err);
   }

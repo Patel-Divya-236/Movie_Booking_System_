@@ -140,27 +140,20 @@ export async function renderSeats(container, { params }) {
     if (!state.selectedSeats.length) return;
 
     const totals = selectionTotals();
-    const payment = await openPayment({ totals, show });
-    if (!payment) return; // cancelled
-
-    const btn = summaryHost.querySelector('#payBtn');
-    btn.disabled = true;
-    btn.textContent = 'Confirming…';
-
+    // openPayment now owns the whole exchange — order, Razorpay Checkout and
+    // server-side verification — and hands back a finished booking.
+    let result;
     try {
-      const result = await api.book({
-        showId: show.showId,
-        seats: state.selectedSeats.map(s => s.id),
-        paymentMode: payment.mode,
-      });
-      state.lastBooking = result.booking;
-      router.go(`/booking/${result.bookingId}`, { replace: true });
+      result = await openPayment({ totals, show });
     } catch (err) {
       toast(err.message, 'error');
-      // Someone else got there first — resync so the map shows the truth.
-      if (err.status === 409) await refreshTakenSeats();
-      else { btn.disabled = false; paintSummary(); }
+      await refreshTakenSeats();
+      return;
     }
+    if (!result) return; // cancelled or failed; the modal explained why
+
+    state.lastBooking = result.booking;
+    router.go(`/booking/${result.bookingId}`, { replace: true });
   }
 
   paintGrid();

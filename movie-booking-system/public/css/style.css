@@ -1213,6 +1213,28 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; }
 .pay-method-label { font-size: 13px; font-weight: 700; }
 .pay-method-hint { font-size: 10.5px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Accepted methods — informational. Razorpay Checkout presents the real
+   chooser, so these are deliberately not buttons. */
+.pay-accepted-label {
+  font-size: 11px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase;
+  color: var(--text-faint); margin-bottom: 8px;
+}
+.pay-accepted { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+.pay-accepted-item {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 11px; font-size: 12px; font-weight: 600; color: var(--text-dim);
+  background: var(--bg-raised); border: 1px solid var(--border); border-radius: 9px;
+}
+.pay-accepted-item img { display: block; width: 22px; height: 22px; }
+
+.pay-hold-note {
+  font-size: 11.5px; color: var(--text-faint); text-align: center;
+  margin-top: 10px; min-height: 16px; line-height: 1.5;
+}
+.pay-banner code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px;
+}
+
 .pay-processing { text-align: center; padding: 34px 16px; }
 .pay-processing h4 { font-size: 16px; font-weight: 700; margin-top: 16px; }
 .pay-processing p { color: var(--text-dim); font-size: 13px; margin-top: 5px; }

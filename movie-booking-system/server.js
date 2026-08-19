@@ -53,6 +53,7 @@ app.use('/api/shows', require('./routes/shows'));
 app.use('/api/bookings', require('./routes/bookings'));
 app.use('/api/support', require('./routes/support'));
 app.use('/api/reviews', require('./routes/reviews'));
+app.use('/api/payments', require('./routes/payments'));
 
 app.get('/api/health', (req, res) => {
   res.json({
