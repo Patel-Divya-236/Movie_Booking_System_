@@ -3,8 +3,7 @@
  *
  * The simulated modal this replaces chose a payment method itself. Razorpay's
  * own Checkout does that now — UPI, cards, net banking and wallets are its
- * screens, not ours — so the tiles here are informational only: a statement of
- * what is accepted, not a control.
+ * screens, not ours — so this modal only confirms what is being bought.
  *
  * The whole exchange lives in this module:
  *
@@ -23,14 +22,6 @@ import { openModal, closeModal } from './modal.js';
 import { html, raw, rupees } from '../dom.js';
 import { api } from '../api.js';
 import { state } from '../state.js';
-
-/** Shown as accepted methods; Razorpay presents the real chooser. */
-const ACCEPTED = [
-  { icon: '/img/upi.svg', label: 'UPI' },
-  { icon: '/img/card.svg', label: 'Cards' },
-  { icon: '/img/netbanking.svg', label: 'Net Banking' },
-  { icon: '/img/wallet.svg', label: 'Wallets' },
-];
 
 /** Razorpay's script is a plain <script> in index.html, not a module. */
 function checkoutReady() {
@@ -74,15 +65,6 @@ export function openPayment({ totals, show }) {
             ${raw(summaryRows.map(([label, value]) => html`
               <div class="pay-row"><span>${label}</span><span>${value}</span></div>`).join(''))}
             <div class="pay-row pay-row--total"><span>Amount payable</span><span>${rupees(totals.total)}</span></div>
-          </div>
-
-          <p class="pay-accepted-label">Pay with</p>
-          <div class="pay-accepted">
-            ${raw(ACCEPTED.map(m => html`
-              <span class="pay-accepted-item">
-                <img src="${m.icon}" alt="" width="24" height="24">
-                <span>${m.label}</span>
-              </span>`).join(''))}
           </div>
 
           <button class="btn btn-primary btn-block btn-lg" id="payNow">

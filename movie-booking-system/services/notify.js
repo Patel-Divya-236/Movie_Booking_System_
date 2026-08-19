@@ -259,6 +259,48 @@ async function sendVerificationEmail(user, rawToken) {
 
 // -------------------------------------------------------------------- support
 
+/**
+ * Tell the operator a ticket has arrived.
+ *
+ * The customer already gets an acknowledgement; nobody was telling the person
+ * who has to answer it. Tickets landed in DynamoDB and waited to be noticed in
+ * the admin queue, which is only checked if you happen to look.
+ *
+ * Goes to ADMIN_EMAIL, falling back to the SMTP sender — that address is
+ * always configured, so this cannot silently do nothing.
+ */
+async function sendSupportAlertToAdmin(ticket) {
+  const to = process.env.ADMIN_EMAIL || process.env.GMAIL_USER || process.env.SMTP_USER;
+  if (!to) return false;
+
+  const link = `${baseUrl()}/support/${ticket.ticketId}`;
+  const body = `
+    <p style="color:#374151;font-size:14px;margin:0 0 14px">
+      <strong>${ticket.userName || 'A customer'}</strong> (${ticket.userEmail})
+      raised a ${ticket.category || 'general'} ticket.
+    </p>
+    <p style="color:#111827;font-size:14px;font-weight:600;margin:0 0 6px">${ticket.subject}</p>
+    <p style="color:#6b7280;font-size:13px;white-space:pre-wrap;margin:0">${(ticket.messages && ticket.messages[0] && ticket.messages[0].body) || ''}</p>
+    ${button(link, 'Open the ticket')}`;
+
+  return sendMail({
+    to,
+    subject: `[${ticket.ticketRef}] ${ticket.subject}`,
+    text: [
+      `New CineCloud support ticket: ${ticket.ticketRef}`,
+      '',
+      `From    : ${ticket.userName || 'unknown'} <${ticket.userEmail}>`,
+      `Category: ${ticket.category || 'general'}`,
+      `Subject : ${ticket.subject}`,
+      '',
+      (ticket.messages && ticket.messages[0] && ticket.messages[0].body) || '',
+      '',
+      link,
+    ].join('\n'),
+    html: shell('New support ticket', ticket.ticketRef, body),
+  });
+}
+
 // ----------------------------------------------------------- password reset
 
 /**
@@ -443,5 +485,6 @@ module.exports = {
   sendPasswordResetEmail,
   sendCancellationEmail,
   sendSupportTicketRaised,
+  sendSupportAlertToAdmin,
   sendSupportReply,
 };

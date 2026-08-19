@@ -111,6 +111,12 @@ router.post('/', authenticate, async (req, res, next) => {
     notify.sendSupportTicketRaised(ticket).catch(err => {
       console.warn('Support notification failed (ticket still saved):', err.message);
     });
+
+    // The customer's acknowledgement is not the same as telling whoever has to
+    // answer it — without this a ticket just sits in the admin queue unnoticed.
+    notify.sendSupportAlertToAdmin(ticket).catch(err => {
+      console.warn('Support admin alert failed (ticket still saved):', err.message);
+    });
   } catch (err) {
     next(err);
   }
