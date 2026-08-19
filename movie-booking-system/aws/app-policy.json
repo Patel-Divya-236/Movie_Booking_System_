@@ -24,15 +24,6 @@
       ]
     },
     {
-      "Sid": "SendTicketEmails",
-      "Effect": "Allow",
-      "Action": [
-        "ses:SendEmail",
-        "ses:SendRawEmail"
-      ],
-      "Resource": "*"
-    },
-    {
       "Sid": "PublishBookingAlerts",
       "Effect": "Allow",
       "Action": "sns:Publish",

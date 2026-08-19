@@ -11,7 +11,34 @@ if (!process.env.JWT_SECRET) {
   process.exit(1);
 }
 
-app.use(cors());
+/**
+ * CORS.
+ *
+ * The frontend is served from a different origin than this API once it lives
+ * on Vercel, so the browser demands an explicit allow. ALLOWED_ORIGINS is a
+ * comma-separated list; leaving it unset falls back to permissive, which is
+ * what local development and the single-origin EC2 deployment already relied
+ * on.
+ *
+ * No credentials:true here on purpose — auth travels in the Authorization
+ * header, not a cookie, so the browser never needs to send credentials
+ * cross-origin and we avoid the stricter rules that come with it.
+ */
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',').map(o => o.trim()).filter(Boolean);
+
+app.use(cors(allowedOrigins.length ? {
+  origin(origin, cb) {
+    // No Origin header means a same-origin or non-browser caller (curl, the
+    // health check) — those are not what CORS is protecting against.
+    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    // Refuse by withholding the header, not by throwing: an Error here becomes
+    // a 500, which looks like a server fault and tells the caller nothing.
+    // Omitting the header is what CORS expects — the browser blocks it.
+    console.warn(`CORS: refused origin ${origin}`);
+    cb(null, false);
+  },
+} : {}));
 app.use(express.json({ limit: '256kb' }));
 
 // Static frontend

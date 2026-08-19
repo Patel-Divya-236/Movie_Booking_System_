@@ -80,10 +80,10 @@ const PENDING_SIGNUP_TTL_HOURS = 24;
 /**
  * Whether an unverified user is blocked from booking.
  *
- * Off by default on purpose: while SES is in the sandbox it can only deliver
- * to addresses verified in AWS, so enforcing this would lock out every user
- * whose address is not already verified there. Turn it on once SES has
- * production access, via REQUIRE_EMAIL_VERIFICATION=true in .env.
+ * Off unless REQUIRE_EMAIL_VERIFICATION=true. Safe to enable now that mail
+ * goes out over SMTP, which delivers to any address — the old caveat was that
+ * SES in the sandbox could only reach identities verified in AWS, so enforcing
+ * this would have locked out every real user.
  */
 const REQUIRE_EMAIL_VERIFICATION = process.env.REQUIRE_EMAIL_VERIFICATION === 'true';
 

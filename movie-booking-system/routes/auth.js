@@ -379,6 +379,124 @@ router.post('/resend-verification', authenticate, async (req, res, next) => {
 });
 
 /** POST /api/auth/change-password */
+/**
+ * Password reset.
+ *
+ * Without this, forgetting a password locks the account permanently — there is
+ * no other recovery path. Same token discipline as email verification: the
+ * emailed value is random, only its SHA-256 hash is stored, and it is cleared
+ * on use so a link cannot be replayed.
+ *
+ * One hour rather than the 24 a signup link gets: a live reset link is a
+ * bearer credential for the account, and the person asking for it is, by
+ * definition, at their inbox right now.
+ */
+const RESET_TOKEN_MINUTES = 60;
+
+/**
+ * POST /api/auth/forgot-password  { email }
+ *
+ * Always answers identically whether or not the address exists. Saying "no
+ * such account" would turn this endpoint into a free membership check for
+ * anyone with a list of addresses.
+ */
+router.post('/forgot-password', async (req, res, next) => {
+  const sameAnswer = {
+    message: 'If that address has an account, a reset link is on its way. Check spam too.',
+  };
+
+  try {
+    const email = normalizeEmail(req.body.email);
+    if (!email) return res.status(400).json({ error: 'Email is required' });
+
+    const user = await findByEmail(email);
+    if (!user) return res.json(sameAnswer);
+
+    const raw = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + RESET_TOKEN_MINUTES * 60_000).toISOString();
+
+    await docClient.send(new UpdateCommand({
+      TableName: TABLES.USERS,
+      Key: { userId: user.userId },
+      UpdateExpression: 'SET resetTokenHash = :h, resetExpiresAt = :e',
+      ExpressionAttributeValues: { ':h': hashToken(raw), ':e': expiresAt },
+    }));
+
+    // Awaited: a reset the user never receives is worse than a slow response,
+    // and this endpoint is not on any hot path.
+    await notify.sendPasswordResetEmail(user, raw, RESET_TOKEN_MINUTES);
+
+    res.json(sameAnswer);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/auth/reset-password  { token, password }
+ *
+ * The token is looked up by hash. Clearing it in the same write that sets the
+ * password is what makes the link single-use.
+ */
+router.post('/reset-password', async (req, res, next) => {
+  try {
+    const { token, password } = req.body;
+    if (!token) return res.status(400).json({ error: 'Reset token missing' });
+
+    const hash = hashToken(token);
+    const match = await docClient.send(new ScanCommand({
+      TableName: TABLES.USERS,
+      FilterExpression: 'resetTokenHash = :h',
+      ExpressionAttributeValues: { ':h': hash },
+    }));
+    const user = match.Items?.[0];
+
+    // Same answer for "no such token" and "expired token" — distinguishing
+    // them tells an attacker whether a guessed token ever existed.
+    if (!user) {
+      return res.status(400).json({ error: 'This reset link is invalid or has already been used' });
+    }
+
+    if (!user.resetExpiresAt || new Date(user.resetExpiresAt).getTime() < Date.now()) {
+      await docClient.send(new UpdateCommand({
+        TableName: TABLES.USERS,
+        Key: { userId: user.userId },
+        UpdateExpression: 'REMOVE resetTokenHash, resetExpiresAt',
+      }));
+      return res.status(410).json({ error: 'This reset link has expired. Request a new one.', expired: true });
+    }
+
+    const check = validatePassword(password, { email: user.email, name: user.name });
+    if (!check.valid) return res.status(400).json({ error: check.error, field: 'password' });
+
+    if (await bcrypt.compare(password, user.password)) {
+      return res.status(400).json({ error: 'That is already your password', field: 'password' });
+    }
+
+    await docClient.send(new UpdateCommand({
+      TableName: TABLES.USERS,
+      Key: { userId: user.userId },
+      UpdateExpression: 'SET password = :p, passwordChangedAt = :t REMOVE resetTokenHash, resetExpiresAt',
+      ExpressionAttributeValues: {
+        ':p': await bcrypt.hash(password, 10),
+        ':t': new Date().toISOString(),
+      },
+    }));
+
+    // Signed in straight away: they have just proved control of the inbox, and
+    // making them retype the password they set five seconds ago is friction
+    // for no security gain. Note that existing tokens elsewhere stay valid
+    // until they expire — this project has no token blacklist.
+    res.json({
+      message: 'Password updated — you are signed in',
+      token: signToken(user),
+      user: publicUser(user),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/change-password', authenticate, async (req, res, next) => {
   try {
     const { currentPassword, newPassword } = req.body;

@@ -148,7 +148,7 @@ async function ensureRole(accountId) {
           Action: 'sts:AssumeRole',
         }],
       }),
-      Description: 'Lets the CineCloud EC2 instance reach DynamoDB, SES and SNS without stored keys',
+      Description: 'Lets the CineCloud EC2 instance reach DynamoDB and SNS without stored keys',
     })),
     `role ${ROLE_NAME}`
   );

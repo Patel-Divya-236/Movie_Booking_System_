@@ -4,8 +4,9 @@
  */
 
 import { state, clearSession } from './state.js';
+import { API_BASE } from './config.js';
 
-const BASE = '/api';
+const BASE = API_BASE;
 
 let onUnauthorized = () => {};
 export function setUnauthorizedHandler(fn) { onUnauthorized = fn; }
@@ -76,6 +77,9 @@ export const api = {
   createMovie: body => request('/movies', { method: 'POST', body }),
   updateMovie: (id, body) => request(`/movies/${id}`, { method: 'PUT', body }),
   deleteMovie: id => request(`/movies/${id}`, { method: 'DELETE' }),
+
+  forgotPassword: email => request('/auth/forgot-password', { method: 'POST', body: { email } }),
+  resetPassword: (token, password) => request('/auth/reset-password', { method: 'POST', body: { token, password } }),
 
   reviews: movieId => request(`/reviews/${movieId}`),
   rateMovie: (movieId, body) => request(`/reviews/${movieId}`, { method: 'POST', body }),

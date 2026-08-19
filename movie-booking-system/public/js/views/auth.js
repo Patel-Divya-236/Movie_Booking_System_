@@ -57,6 +57,7 @@ export function renderLogin(container) {
         ${raw(field({ id: 'password', label: 'Password', type: 'password', autocomplete: 'current-password', placeholder: 'Your password' }))}
         <button type="submit" class="btn btn-primary btn-block btn-lg" id="submit">Sign in</button>
       </form>
+      <p class="auth-alt"><a href="/forgot">Forgot your password?</a></p>
       <p class="auth-alt">New here? <a href="/register">Create an account</a></p>
     </div>`;
 
@@ -83,6 +84,129 @@ export function renderLogin(container) {
       setFieldState(container.querySelector('#password'), 'invalid', err.message);
       btn.disabled = false;
       btn.textContent = 'Sign in';
+    }
+  });
+}
+
+// -------------------------------------------------------- forgot password
+
+/**
+ * Ask for a reset link.
+ *
+ * The success screen is shown for ANY valid-looking address, matching what the
+ * server says — it deliberately does not reveal whether an account exists, so
+ * this page must not either. Telling the user "no such account" here would
+ * undo the protection entirely.
+ */
+export function renderForgot(container) {
+  container.innerHTML = html`
+    <div class="auth-card">
+      <h2>Forgot your password?</h2>
+      <p class="auth-sub">We'll email you a link to set a new one</p>
+      <form id="forgotForm" novalidate>
+        ${raw(field({ id: 'email', label: 'Email', type: 'email', autocomplete: 'email', placeholder: 'you@example.com' }))}
+        <button type="submit" class="btn btn-primary btn-block btn-lg" id="submit">Send reset link</button>
+      </form>
+      <p class="auth-alt">Remembered it? <a href="/login">Sign in</a></p>
+    </div>`;
+
+  const form = container.querySelector('#forgotForm');
+  const btn = container.querySelector('#submit');
+
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const email = container.querySelector('#email').value.trim();
+    const check = checkEmail(email);
+    if (!check.valid) {
+      setFieldState(container.querySelector('#email'), 'invalid', check.error);
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+    try {
+      const res = await api.forgotPassword(email);
+      container.innerHTML = html`
+        <div class="auth-card" style="text-align:center">
+          <div style="font-size:44px;margin-bottom:10px">📬</div>
+          <h2>Check your email</h2>
+          <p class="auth-sub">${res.message}</p>
+          <p class="muted" style="font-size:12.5px;margin-top:10px">The link works once and expires in an hour.</p>
+          <a class="btn btn-ghost btn-block" href="/login">Back to sign in</a>
+        </div>`;
+    } catch (err) {
+      toast(err.message, 'error');
+      btn.disabled = false;
+      btn.textContent = 'Send reset link';
+    }
+  });
+}
+
+/** Landing page for the link in the reset email. */
+export function renderReset(container, { query } = { query: {} }) {
+  if (!query.token) {
+    container.innerHTML = html`
+      <div class="auth-card" style="text-align:center">
+        <div style="font-size:44px;margin-bottom:10px">🔗</div>
+        <h2>Nothing to reset</h2>
+        <p class="auth-sub">This page is reached from the link in your reset email.</p>
+        <a class="btn btn-primary btn-block" href="/forgot">Request a link</a>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = html`
+    <div class="auth-card">
+      <h2>Choose a new password</h2>
+      <p class="auth-sub">Then you'll be signed in automatically</p>
+      <form id="resetForm" novalidate>
+        ${raw(field({ id: 'password', label: 'New password', type: 'password', autocomplete: 'new-password', placeholder: 'At least 8 characters' }))}
+        <button type="submit" class="btn btn-primary btn-block btn-lg" id="submit">Set new password</button>
+      </form>
+      <p class="auth-alt"><a href="/login">Back to sign in</a></p>
+    </div>`;
+
+  wirePasswordToggles(container);
+
+  const passwordEl = container.querySelector('#password');
+  const btn = container.querySelector('#submit');
+
+  // Same live strength feedback as signup, so the rules are not a surprise
+  // only revealed when the form is submitted.
+  passwordEl.addEventListener('input', () => {
+    const check = checkPassword(passwordEl.value);
+    if (!passwordEl.value) return setFieldState(passwordEl, '', '');
+    setFieldState(passwordEl, check.valid ? 'valid' : 'invalid', check.valid ? '' : check.error);
+  });
+
+  container.querySelector('#resetForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const check = checkPassword(passwordEl.value);
+    if (!check.valid) return setFieldState(passwordEl, 'invalid', check.error);
+
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      const data = await api.resetPassword(query.token, passwordEl.value);
+      setSession(data.token, data.user);
+      renderNavbar();
+      toast(data.message, 'success');
+      router.go('/', { replace: true });
+    } catch (err) {
+      toast(err.message, 'error');
+      if (err.data?.expired) {
+        container.innerHTML = html`
+          <div class="auth-card" style="text-align:center">
+            <div style="font-size:44px;margin-bottom:10px">⏰</div>
+            <h2>This link has expired</h2>
+            <p class="auth-sub">${err.message}</p>
+            <a class="btn btn-primary btn-block" href="/forgot">Request a new link</a>
+          </div>`;
+        return;
+      }
+      setFieldState(passwordEl, 'invalid', err.message);
+      btn.disabled = false;
+      btn.textContent = 'Set new password';
     }
   });
 }

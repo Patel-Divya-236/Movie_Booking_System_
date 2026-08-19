@@ -6,7 +6,6 @@
  * Idempotent — safe to run repeatedly. It:
  *   1. confirms which AWS account and identity it is about to act on
  *   2. creates the SNS topic for booking alerts (and subscribes an admin email)
- *   3. submits the SES sender address for verification
  *   4. writes the resulting ARNs back into .env
  *
  * DynamoDB tables are NOT created here — run `node setup-tables.js` for that,
@@ -20,10 +19,6 @@ const readline = require('readline');
 
 const { STSClient, GetCallerIdentityCommand } = require('@aws-sdk/client-sts');
 const { SNSClient, CreateTopicCommand, SubscribeCommand, ListSubscriptionsByTopicCommand } = require('@aws-sdk/client-sns');
-const {
-  SESClient, VerifyEmailIdentityCommand, GetIdentityVerificationAttributesCommand,
-  GetSendQuotaCommand,
-} = require('@aws-sdk/client-ses');
 
 const REGION = process.env.AWS_REGION || 'ap-south-1';
 const TOPIC_NAME = process.env.SNS_TOPIC_NAME || 'cinecloud-bookings';
@@ -41,9 +36,7 @@ const c = {
 /**
  * Flags let this run unattended (CI, or an agent driving it):
  *   --yes             skip the confirmation prompt
- *   --from=EMAIL      SES sender address
  *   --alerts=EMAIL    address to subscribe to the SNS topic
- *   --no-ses          skip SES entirely
  */
 const flags = Object.fromEntries(
   process.argv.slice(2).map(a => {
@@ -140,54 +133,6 @@ async function setupSns() {
   return TopicArn;
 }
 
-// ------------------------------------------------------------------- SES
-
-async function setupSes() {
-  console.log(c.bold('\n📧 Step 3 — SES sender address\n'));
-  const ses = new SESClient({ region: REGION });
-
-  if (flags['no-ses']) {
-    console.log(c.dim('   Skipped (--no-ses).'));
-    return null;
-  }
-
-  let from = flags.from || process.env.SES_FROM_EMAIL;
-  if (!from || from.includes('example.com')) {
-    from = (await ask('   Address tickets will be sent FROM (blank to skip): ')).toString().trim();
-    if (!from) {
-      console.log(c.dim('   Skipped — bookings will still work, emails just will not send.'));
-      return null;
-    }
-  }
-
-  const attrs = await ses.send(new GetIdentityVerificationAttributesCommand({ Identities: [from] }));
-  const status = attrs.VerificationAttributes?.[from]?.VerificationStatus;
-
-  if (status === 'Success') {
-    console.log(c.green(`   ✅ ${from} is already verified`));
-  } else {
-    await ses.send(new VerifyEmailIdentityCommand({ EmailAddress: from }));
-    console.log(c.yellow(`   📨 Verification email sent to ${from}`));
-    console.log(c.yellow('      Click the link in it before expecting any ticket emails.'));
-  }
-
-  setEnvValue('SES_FROM_EMAIL', from);
-  console.log(c.dim('      → written to .env as SES_FROM_EMAIL'));
-
-  // Sandbox accounts can only send TO verified addresses, which surprises
-  // everyone the first time a customer email silently fails.
-  const quota = await ses.send(new GetSendQuotaCommand({}));
-  const sandboxed = quota.Max24HourSend <= 200;
-  console.log(`\n   Send quota: ${quota.Max24HourSend}/day`);
-  if (sandboxed) {
-    console.log(c.yellow('   ⚠ This account is in the SES sandbox.'));
-    console.log(c.yellow('     You can only send to VERIFIED addresses. Verify each test'));
-    console.log(c.yellow('     recipient in the SES console, or request production access.'));
-  }
-
-  return from;
-}
-
 // ------------------------------------------------------------------ main
 
 (async () => {
@@ -195,19 +140,17 @@ async function setupSes() {
 
   const identity = await preflight();
   const topicArn = await setupSns();
-  const fromEmail = await setupSes();
 
   console.log(c.bold('\n═══ Done ═══\n'));
   console.log('   Account       ', identity.Account);
   console.log('   Region        ', REGION);
   console.log('   SNS topic     ', topicArn || '—');
-  console.log('   SES sender    ', fromEmail || '— (not configured)');
 
   console.log(c.bold('\n   Next:\n'));
   console.log('   1. Comment out DYNAMODB_ENDPOINT in .env (so it targets real AWS)');
   console.log('   2. node setup-tables.js      # creates the 6 tables + indexes, seeds data');
   console.log('   3. node server.js            # run it');
-  console.log('   4. Confirm the SNS + SES emails in your inbox');
+  console.log('   4. Confirm the SNS subscription email in your inbox');
   console.log(c.dim('\n   To deploy on EC2, see EC2_SETUP.md\n'));
 })().catch(err => {
   console.error(c.red(`\n❌ Setup failed: ${err.message}`));

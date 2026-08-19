@@ -124,7 +124,7 @@ router.get('/:id/ticket', authenticate, async (req, res, next) => {
  */
 router.post('/', authenticate, async (req, res, next) => {
   try {
-    // Off while SES is sandboxed — see REQUIRE_EMAIL_VERIFICATION in
+    // See REQUIRE_EMAIL_VERIFICATION in
     // config/catalog.js for why enforcing it there would lock users out.
     if (REQUIRE_EMAIL_VERIFICATION && !req.user.emailVerified) {
       return res.status(403).json({
@@ -242,7 +242,7 @@ router.post('/', authenticate, async (req, res, next) => {
     res.status(201).json({ message: 'Booking confirmed', bookingId, bookingRef, booking });
 
     // Ticket email and admin alert happen after the response — a slow or
-    // misconfigured SES must never delay or fail a confirmed booking.
+    // misconfigured mail provider must never delay or fail a confirmed booking.
     notify.sendBookingNotifications(booking).catch(err => {
       console.warn('Notification failed (booking is unaffected):', err.message);
     });
@@ -308,6 +308,13 @@ router.delete('/:id', authenticate, async (req, res, next) => {
         },
       ],
     }));
+
+    // Only now that the transaction has committed. The conditional update can
+    // legitimately fail, and a "cancelled" email for a booking that is still
+    // live would be worse than no email at all.
+    notify.sendCancellationEmail({ ...booking, status: 'cancelled' }).catch(err => {
+      console.error(`✉ cancellation email failed for ${booking.bookingRef}:`, err.message);
+    });
 
     res.json({ message: 'Booking cancelled — those seats are available again' });
   } catch (err) {

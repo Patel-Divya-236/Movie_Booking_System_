@@ -11,7 +11,7 @@ import { renderNavbar, openCityPicker } from './components/navbar.js';
 import { closeModal } from './components/modal.js';
 
 import { renderHome } from './views/home.js';
-import { renderLogin, renderRegister, setPostAuthRedirect } from './views/auth.js';
+import { renderLogin, renderRegister, renderForgot, renderReset, setPostAuthRedirect } from './views/auth.js';
 import { renderMovieDetail } from './views/movieDetail.js';
 import { renderShowtimes } from './views/showtimes.js';
 import { renderSeats } from './views/seats.js';
@@ -60,6 +60,10 @@ function defineRoutes() {
   router.define('/', view(renderHome), { needsCity: true });
   router.define('/login', view(renderLogin));
   router.define('/register', view(renderRegister));
+  // No banner on these: an unverified user resetting a password does not
+  // need to be nagged about verification mid-recovery.
+  router.define('/forgot', view(renderForgot, { banner: false }));
+  router.define('/reset', view(renderReset, { banner: false }));
   router.define('/movie/:movieId', view(renderMovieDetail), { needsCity: true });
   router.define('/movie/:movieId/shows', view(renderShowtimes), { needsCity: true });
   router.define('/show/:showId/seats', view(renderSeats));

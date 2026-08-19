@@ -1,9 +1,8 @@
 /**
  * Notification content.
  *
- * This module decides *what* to send; services/mailer.js decides *how* — it
- * tries Amazon SES first and falls back to Gmail SMTP when SES refuses an
- * unverified recipient.
+ * This module decides *what* to send; services/mailer.js decides *how* —
+ * SMTP, via Gmail or any configured provider.
  *
  * SNS is separate and deliberately not used for customer email: it can only
  * reach confirmed topic subscribers and supports neither attachments nor HTML.
@@ -174,14 +173,14 @@ async function sendBookingNotifications(booking) {
 
   results.forEach((r, i) => {
     if (r.status === 'rejected') {
-      console.warn(`${i === 0 ? 'SES email' : 'SNS alert'} failed:`, r.reason?.message || r.reason);
+      console.warn(`${i === 0 ? 'Ticket email' : 'SNS alert'} failed:`, r.reason?.message || r.reason);
     }
   });
 
   return { emailed: results[0].value === true, alerted: results[1].value === true };
 }
 
-// ------------------------------------------------------- generic SES sender
+// ----------------------------------------------------------- generic sender
 
 /**
  * Send a plain (no-attachment) email.
@@ -260,6 +259,116 @@ async function sendVerificationEmail(user, rawToken) {
 
 // -------------------------------------------------------------------- support
 
+// ----------------------------------------------------------- password reset
+
+/**
+ * Emailed reset link.
+ *
+ * Short-lived by design — a reset link is a bearer credential for the account,
+ * so it lives for an hour rather than the 24 hours a signup link gets. The
+ * message names the expiry and says plainly what to do if it was not
+ * requested, because an unexpected reset email is exactly how someone finds
+ * out their address is being targeted.
+ */
+async function sendPasswordResetEmail(user, rawToken, validForMinutes) {
+  const link = `${baseUrl()}/reset?token=${encodeURIComponent(rawToken)}`;
+
+  const body = `
+    <p style="color:#374151;font-size:14px;margin:0 0 8px">
+      Hi ${user.name || 'there'}, someone asked to reset the password for this account.
+    </p>
+    <p style="color:#374151;font-size:14px;margin:0 0 4px">
+      Use the button below to choose a new one. The link works once and expires
+      in ${validForMinutes} minutes.
+    </p>
+    ${button(link, 'Choose a new password')}
+    <p style="color:#6b7280;font-size:12px;margin:12px 0 0">
+      Or paste this into your browser:<br>
+      <span style="color:#7c3aed;word-break:break-all">${link}</span>
+    </p>
+    <p style="color:#6b7280;font-size:12.5px;margin:16px 0 0">
+      If this was not you, ignore this email — your password stays as it is and
+      nothing has changed.
+    </p>`;
+
+  return sendMail({
+    to: user.email,
+    subject: 'Reset your CineCloud password',
+    text: [
+      `Hi ${user.name || 'there'},`,
+      '',
+      'Someone asked to reset the password for this CineCloud account.',
+      `Open this link to choose a new one (works once, expires in ${validForMinutes} minutes):`,
+      '',
+      link,
+      '',
+      'If this was not you, ignore this email — nothing has changed.',
+    ].join('\n'),
+    html: shell('Reset your password', 'Password reset requested', body),
+  });
+}
+
+// ------------------------------------------------------------- cancellation
+
+/**
+ * Confirm a cancellation in writing.
+ *
+ * Sent after the seats are actually released, never before — the release is a
+ * conditional transaction that can legitimately fail (two cancel clicks
+ * racing), and telling someone their booking is cancelled when it isn't is
+ * worse than sending nothing.
+ *
+ * Deliberately restates what was cancelled. A bare "your booking is
+ * cancelled" leaves someone with several bookings unable to tell which one
+ * went, and that is exactly when people write to support.
+ */
+async function sendCancellationEmail(booking) {
+  const when = `${formatDate(booking.startsAt || booking.date)} at ${booking.time}`;
+  const seats = seatSummary(booking.seats);
+
+  const row = (label, value) => `
+    <tr>
+      <td style="padding:6px 0;color:#6b7280;font-size:13px">${label}</td>
+      <td style="padding:6px 0;color:#111827;font-size:13px;font-weight:600;text-align:right">${value}</td>
+    </tr>`;
+
+  const body = `
+    <p style="color:#374151;font-size:14px;margin:0 0 16px">
+      Your booking for <strong>${booking.movieTitle}</strong> has been cancelled and those
+      seats are back on sale.
+    </p>
+    <table style="width:100%;border-collapse:collapse">
+      ${row('Booking ID', booking.bookingRef)}
+      ${row('Cinema', `${booking.theatreName}${booking.area ? `, ${booking.area}` : ''}`)}
+      ${row('When', when)}
+      ${row('Seats released', seats)}
+      ${row('Amount paid', rupees(booking.totalPrice))}
+    </table>
+    <p style="color:#6b7280;font-size:12.5px;margin:16px 0 0">
+      No refund is issued because no payment was taken — CineCloud is a student
+      project and every booking is simulated.
+    </p>
+    ${button(baseUrl(), 'Book something else')}`;
+
+  return sendMail({
+    to: booking.userEmail,
+    subject: `Booking cancelled — ${booking.movieTitle} (${booking.bookingRef})`,
+    text: [
+      `Your CineCloud booking has been cancelled.`,
+      ``,
+      `${booking.movieTitle}`,
+      `Booking ID   : ${booking.bookingRef}`,
+      `Cinema       : ${booking.theatreName}${booking.area ? `, ${booking.area}` : ''}`,
+      `When         : ${when}`,
+      `Seats released: ${seats}`,
+      ``,
+      `Those seats are available to book again.`,
+      `No refund is issued because no payment was taken — bookings here are simulated.`,
+    ].join('\n'),
+    html: shell('Booking cancelled', 'Your seats have been released', body),
+  });
+}
+
 async function sendSupportTicketRaised(ticket) {
   const link = `${baseUrl()}/support/${ticket.ticketId}`;
 
@@ -331,6 +440,8 @@ module.exports = {
   publishAdminAlert,
   sendMail,
   sendVerificationEmail,
+  sendPasswordResetEmail,
+  sendCancellationEmail,
   sendSupportTicketRaised,
   sendSupportReply,
 };
