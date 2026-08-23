@@ -9,6 +9,21 @@ const { BOOKING_WINDOW_DAYS } = require('../config/catalog');
 
 const router = express.Router();
 
+/**
+ * Today's calendar date where the cinema is, as YYYY-MM-DD.
+ *
+ * Not `new Date().toISOString().slice(0, 10)`: that is the UTC date, and in
+ * IST (UTC+5:30) everything before 05:30 local still reads as yesterday. The
+ * listing defaulted to a day with no shows every morning.
+ */
+function todayLocal() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 // ------------------------------------------------------------- helpers
 
 function to12Hour(hhmm) {
@@ -59,7 +74,7 @@ router.get('/', async (req, res, next) => {
     const { movieId, city, date } = req.query;
     if (!city) return res.status(400).json({ error: 'city is required' });
 
-    const day = date || new Date().toISOString().slice(0, 10);
+    const day = date || todayLocal();
 
     const items = movieId
       // Narrowest query available: this film, this city, this day.
@@ -113,7 +128,7 @@ router.get('/dates', async (req, res, next) => {
     const { movieId, city } = req.query;
     if (!city) return res.status(400).json({ error: 'city is required' });
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayLocal();
 
     // Must page: a fortnight of showtimes for a city exceeds DynamoDB's 1MB
     // response cap, and a truncated read here silently shortens the date strip.
@@ -288,7 +303,7 @@ router.post('/generate', authenticate, adminOnly, async (req, res, next) => {
       const dt = new Date();
       dt.setHours(0, 0, 0, 0);
       dt.setDate(dt.getDate() + d);
-      const date = dt.toISOString().slice(0, 10);
+      const date = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
       for (const time24 of times) {
         shows.push(buildShow({ movie, theatre, screen, format: resolved, date, time24 }));
       }

@@ -273,11 +273,22 @@ function to12Hour(hhmm) {
   return `${hour}:${String(m).padStart(2, '0')} ${suffix}`;
 }
 
+/**
+ * A calendar date `offsetDays` from today, as YYYY-MM-DD.
+ *
+ * Built from the local calendar fields rather than toISOString(). Local
+ * midnight in IST is 18:30 UTC the previous day, so the ISO form returns
+ * yesterday — which quietly shifted the whole booking window back a day and
+ * generated shows that had already happened.
+ */
 function dateKey(offsetDays) {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   d.setDate(d.getDate() + offsetDays);
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function roundTo10(n) {
@@ -668,10 +679,22 @@ async function setup() {
   console.log('\n🎉 Setup complete — run: node server.js\n');
 }
 
-setup().catch(err => {
-  console.error('\n❌ Setup failed:', err.message);
-  if (err.name === 'UnrecognizedClientException' || err.name === 'CredentialsProviderError') {
-    console.error('   No valid AWS credentials. For local dev set DYNAMODB_ENDPOINT and run DynamoDB Local.');
-  }
-  process.exit(1);
-});
+// Only reseed when this file is run directly.
+//
+// Without this guard a plain `require('./setup-tables')` rewrites the entire
+// catalogue as a side effect of the import — new movie ids, new theatres, new
+// shows — which orphans every existing booking. That is exactly what happened
+// once; the guard is here so it cannot happen again.
+if (require.main === module) {
+  setup().catch(err => {
+    console.error('\n❌ Setup failed:', err.message);
+    if (err.name === 'UnrecognizedClientException' || err.name === 'CredentialsProviderError') {
+      console.error('   No valid AWS credentials. For local dev set DYNAMODB_ENDPOINT and run DynamoDB Local.');
+    }
+    process.exit(1);
+  });
+}
+
+// Exported so the showtime window can be topped up without reseeding anything
+// else. See refresh-shows.js.
+module.exports = { buildShows, batchPut, seedReviews };
